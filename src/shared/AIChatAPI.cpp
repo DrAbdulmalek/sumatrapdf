@@ -529,8 +529,18 @@ struct CustomAIProvider : AIChatProvider {
         checkboxLabel = StrL("Include current page text");
         generatesSessionId = true;
     }
-    TempStr TitleTemp() override { return str::DupTemp(gSettings->customAI.name); }
-    TempStr NotInstalledInstructionTemp() override { return StrL("Configure CustomAI in Advanced Settings."); }
+    TempStr TitleTemp() override {
+        Str name = gSettings->customAI.name;
+        str::TrimWsBoth(name);
+        if (len(name) == 0) {
+            return str::DupTemp(StrL("Custom AI"));
+        }
+        return str::DupTemp(name);
+    }
+    TempStr NotInstalledInstructionTemp() override {
+        return StrL("Configure CustomAI in Advanced Settings (BaseURL, Model, API key or API key env). "
+                    "Supports OpenAI-compatible endpoints such as Qwen, local servers, and other providers.");
+    }
     bool IsInstalled() override { return true; }
     TempStr FindExecutableTemp() override { return {}; }
     void BuildModelsList(StrVec& models) override {
@@ -546,6 +556,20 @@ struct CustomAIProvider : AIChatProvider {
             str::TrimWsBoth(item);
             if (len(item) > 0 && AIChatFindModelInList(models, item) < 0) {
                 models.Append(item);
+            }
+        }
+        // Helpful presets for OpenAI-compatible endpoints (shown as selectable suggestions)
+        if (len(models) == 0) {
+            static const char* presets[] = {
+                "qwen-plus",
+                "qwen-turbo",
+                "qwen-max",
+                "qwen2.5-72b-instruct",
+                "gpt-4o-mini",
+                "llama3.1",
+            };
+            for (const char* p : presets) {
+                models.Append(StrL(p));
             }
         }
     }

@@ -117916,8 +117916,10 @@ static Str ThemeResolvedSystemUIFont(const Str* installed, int n) {
     }
 
     static const char* kFallbacks[] = {
-        ".ZedMono",     ".ZedSans",  "Helvetica", "Segoe UI",    "Ubuntu",
-        "Adwaita Sans", "Cantarell", "Noto Sans", "DejaVu Sans", "Arial",
+        ".ZedMono",     ".ZedSans",        "Helvetica",       "Segoe UI",
+        "Ubuntu",       "Adwaita Sans",    "Cantarell",       "Noto Sans",
+        "Noto Sans Arabic", "Noto Naskh Arabic", "DejaVu Sans", "Tahoma",
+        "Arial",
     };
     for (int i = 0; i < (int)dimof(kFallbacks); i++) {
         Str key = Str(kFallbacks[i]);

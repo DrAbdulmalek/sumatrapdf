@@ -1,46 +1,29 @@
-*.suo
-*.aps
-*.opensdf
-*.sdf
-*.vspx
-*.vcxproj.user
-*.cov
-out.txt
+# SumatraPDF build artifacts and local workaround files
 out/
-agent-tools/
-ext/mupdf/generated/
-.vs/
-.vscode/db/
-.vscode/ipch/
-artifacts/
+build_debug.log
+build_debug.log.prev
+build_debug_*.log
+build_resume_*.log
+build_resume_*.log.prev
+sumatrapdf.tar.gz
+
+# Local npm workaround (do not commit)
+package.json
+package-lock.json
+bun.lockb
+
+# AppImage packaging artifacts (local only)
+AppDir/
+appimagetool-*.AppImage
+*.AppImage
+
+# IDE / OS
+.vscode/
 .idea/
-src/.vscode
-tools/pdfjs/coverage/
-cppcheck.out.txt
-clangtidy.out.txt
-node_modules
+*.swp
+*~
+.DS_Store
 
-.claude/settings.local.json
-.playwright-mcp/
-pipe-preview-results
-nul
-docs/scratch.txt
-docs/rtf_to_check.md
-bin/zopflipng.exe
-
-cmd/tmp/
-
+# Local build/work artifacts (not for commit)
 .work/
-log.txt
-inlined.txt
-sumlog.txt
-vs2022/enc_temp_folder
-
-# temporary / scratch output written by tests (see tests/util.ts tmpPath())
-tests/tmp/
-/.tmp
-/terminals
-/mcps/tasks/tools
-/bin/resvg.exe
-/scratch.txt
-/.DS_Store
+node_modules/

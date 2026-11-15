@@ -715,9 +715,11 @@ constexpr int kAIChatDefaultFontSize = 13;
 constexpr float kAIChatDefaultLineSpacing = 1.5f;
 constexpr int kAIChatDefaultPadding = 8;
 constexpr const char* kAIChatDefaultFont = "Segoe UI";
+constexpr const char* kAIChatFontFallbacks =
+    "'Noto Sans Arabic', 'Noto Naskh Arabic', 'Tahoma', 'DejaVu Sans', sans-serif";
 
 // a font-family value: the name in quotes, with the characters that could end
-// the quote or the declaration removed, then the default font as fallback
+// the quote or the declaration removed, then cross-platform and Arabic fallbacks
 static TempStr AIChatCssFontFamilyTemp(Str name) {
     str::Builder b;
     b.Append(StrL("'"));
@@ -728,7 +730,7 @@ static TempStr AIChatCssFontFamilyTemp(Str name) {
         }
         b.AppendChar(c);
     }
-    b.Append(fmt("', '%s', sans-serif", StrL(kAIChatDefaultFont)));
+    b.Append(fmt("', '%s', %s", StrL(kAIChatDefaultFont), StrL(kAIChatFontFallbacks)));
     return str::DupTemp(ToStr(b));
 }
 

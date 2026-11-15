@@ -376,8 +376,11 @@ enum {
     CmdViewAsHex = 570,
     CmdAIChatWithCustomAPI = 571,
     CmdSaveTrimmedPagesAs = 572,
+    CmdSaveLogAs = 573,
+    CmdSaveAsSearchablePdf = 574,
+    CmdFlattenPdf = 575,
 
-    CmdLast = 572,
+    CmdLast = 575,
     CmdFirstCustom = CmdLast + 100,
 
     // aliases, at the end to not mess ordering

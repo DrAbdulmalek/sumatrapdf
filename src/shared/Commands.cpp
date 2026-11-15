@@ -382,6 +382,9 @@ const CommandInfo gCommands[] = {
     {CmdViewAsHex, "CmdViewAsHex\0", StrL("View As Hex")},
     {CmdAIChatWithCustomAPI, "CmdAIChatWithCustomAPI\0", StrL("Custom AI chat...")},
     {CmdSaveTrimmedPagesAs, "CmdSaveTrimmedPagesAs\0", StrL("Save Trimmed Pages As...")},
+    {CmdSaveLogAs, "CmdSaveLogAs\0", StrL("Save Log As...")},
+    {CmdSaveAsSearchablePdf, "CmdSaveAsSearchablePdf\0", StrL("Save as Searchable PDF...")},
+    {CmdFlattenPdf, "CmdFlattenPdf\0", StrL("Flatten PDF...")},
 };
 const int gCommandsCount = dimofi(gCommands);
 

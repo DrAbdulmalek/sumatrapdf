@@ -3048,6 +3048,290 @@ static void SaveCurrentFileAs(MainWindow* win) {
     args->filter = str::Dup(ToStr(fileFilter));
 
     // note: no directory, so that the OS picks a reasonable default
+
+// ===========================================================================
+// Feedback / productivity commands added for the Manjaro port
+// ===========================================================================
+
+// Save the current application log to a user-chosen file, for feedback /
+// troubleshooting reports. Works even when no document is loaded.
+static void OnLogPathPicked(SavePathArgs* args) {
+    MainWindow* win = args->win;
+    TempStr path = str::DupTemp(args->path);
+    str::Free(args->path);
+    args->path = {};
+    delete args;
+
+    if (len(path) == 0 || !IsMainWindowValidAndNotClosing(win)) {
+        return;
+    }
+    bool ok = WriteCurrentLogToFile(path);
+    if (!ok) {
+        MessageBoxWarning(win, Tr("Failed to save log file"));
+        return;
+    }
+    ShowTemporaryNotification(win, Tr("Log saved"), kNotif5SecsTimeOut);
+}
+
+static void SaveLogAs(MainWindow* win) {
+    if (!CanAccessDisk()) {
+        ShowTemporaryNotification(win, Tr("Disk access not allowed"), kNotif5SecsTimeOut);
+        return;
+    }
+    TempStr seed = path::JoinTemp(GetAppDataDirTemp(), StrL("sumatra-log.txt"));
+    auto* args = new SavePathArgs();
+    args->win = win;
+    args->title = str::Dup(Tr("Save Log As..."));
+    args->initialPath = str::Dup(seed);
+    args->defExt = str::Dup(StrL(".txt"));
+    args->noDefExt = true;
+    args->onDone = MkFunc1(OnLogPathPicked, args);
+    ShowSavePathDialog(args);
+}
+
+// --- Save as Searchable PDF (OCR) ------------------------------------------
+
+struct SearchablePdfCtx {
+    MainWindow* win = nullptr;
+    Str dstPath; // owned
+    int pageCount = 0;
+    int currentPage = 0;
+    fz_document_writer* writer = nullptr;
+    fz_document* doc = nullptr;
+    fz_context* ctx = nullptr;
+    bool ok = false;
+};
+
+static void SearchablePdfProgress(fz_context* ctx, void* arg, int page, int percent) {
+    SearchablePdfCtx* c = (SearchablePdfCtx*)arg;
+    if (!c || !c->win) {
+        return;
+    }
+    // No per-page UI update needed here; completion is reported on finish.
+    (void)ctx;
+    (void)page;
+    (void)percent;
+}
+
+static void SearchablePdfFinish(SearchablePdfCtx* c) {
+    if (!c) {
+        return;
+    }
+    MainWindow* win = c->win;
+    if (c->writer) {
+        fz_close_document_writer(c->ctx, c->writer);
+        fz_drop_document_writer(c->ctx, c->writer);
+        c->writer = nullptr;
+    }
+    if (c->doc) {
+        fz_close_document(c->ctx, c->doc);
+        c->doc = nullptr;
+    }
+    if (c->ctx) {
+        fz_drop_context(c->ctx);
+        c->ctx = nullptr;
+    }
+    if (c->ok && len(c->dstPath)) {
+        ShowTemporaryNotification(win, Tr("Searchable PDF saved"), kNotif5SecsTimeOut);
+    } else {
+        MessageBoxWarning(win, Tr("Failed to create searchable PDF"));
+    }
+    str::Free(c->dstPath);
+    delete c;
+}
+
+static void SearchablePdfThread(SearchablePdfCtx* c) {
+    if (!c || !c->win || !c->doc || !c->ctx) {
+        SearchablePdfFinish(c);
+        return;
+    }
+    fz_try(c->ctx) {
+        int n = fz_count_pages(c->ctx, c->doc);
+        c->pageCount = n;
+        for (int i = 0; i < n; i++) {
+            c->currentPage = i + 1;
+            fz_page* page = fz_load_page(c->ctx, c->doc, i);
+            if (!page) {
+                fz_throw(c->ctx, FZ_ERROR_ARGUMENT, "no page %d", i);
+            }
+            fz_device* dev = fz_begin_page(c->ctx, c->writer, fz_bound_page(c->ctx, page));
+            fz_run_page(c->ctx, page, dev, fz_identity, nullptr);
+            fz_end_page(c->ctx, c->writer);
+            fz_drop_page(c->ctx, page);
+        }
+        c->ok = true;
+    } fz_catch(c->ctx) {
+        fz_report_error(c->ctx);
+        logf("SearchablePdfThread: failed for '%s'\n", c->dstPath ? c->dstPath.s : StrL("(null)"));
+        c->ok = false;
+    }
+    uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("SearchablePdfFinish"));
+}
+
+static void OnSearchablePdfPathPicked(SavePathArgs* args) {
+    MainWindow* win = args->win;
+    TempStr path = str::DupTemp(args->path);
+    str::Free(args->path);
+    args->path = {};
+    delete args;
+
+    if (len(path) == 0 || !IsMainWindowValidAndNotClosing(win)) {
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e || !e->_doc) {
+        ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
+        return;
+    }
+    // Keep a stable reference to the document while the OCR thread runs.
+    fz_context* baseCtx = e->Ctx();
+    fz_try(baseCtx) {
+        fz_keep_document(baseCtx, e->_doc);
+    } fz_catch(baseCtx) {
+        fz_report_error(baseCtx);
+    }
+
+    auto* c = new SearchablePdfCtx();
+    c->win = win;
+    c->dstPath = str::Dup(path);
+    c->doc = e->_doc;
+    c->ctx = fz_clone_context(baseCtx);
+    if (!c->ctx) {
+        ShowTemporaryNotification(win, Tr("Failed to start OCR"), kNotif5SecsTimeOut);
+        str::Free(c->dstPath);
+        delete c;
+        return;
+    }
+    TempStr options = fmt("ocr-language=eng,compression=flate");
+    c->writer = fz_new_pdfocr_writer(c->ctx, CStrTemp(path), CStrTemp(options));
+    if (!c->writer) {
+        ShowTemporaryNotification(win, Tr("Failed to start OCR writer"), kNotif5SecsTimeOut);
+        fz_drop_context(c->ctx);
+        c->ctx = nullptr;
+        str::Free(c->dstPath);
+        delete c;
+        return;
+    }
+    fz_pdfocr_writer_set_progress(c->ctx, c->writer, SearchablePdfProgress, c);
+    auto fn = MkFunc1Void(SearchablePdfThread, c);
+    RunAsync(fn, StrL("SaveAsSearchablePdf"));
+}
+
+static void SaveAsSearchablePdf(MainWindow* win) {
+    if (!CanAccessDisk() || !win->IsDocLoaded()) {
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e || !e->_doc) {
+        ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
+        return;
+    }
+    TempStr srcFileName = str::DupTemp(engine->FilePath());
+    TempStr seed = path::GetPathNoExtTemp(srcFileName);
+    seed = str::JoinTemp(seed, StrL(" Searchable.pdf"));
+    auto* args = new SavePathArgs();
+    args->win = win;
+    args->title = str::Dup(Tr("Save as Searchable PDF..."));
+    args->initialPath = str::Dup(seed);
+    args->defExt = str::Dup(StrL(".pdf"));
+    args->onDone = MkFunc1(OnSearchablePdfPathPicked, args);
+    ShowSavePathDialog(args);
+}
+
+// --- Flatten PDF (MuPDF pdf_bake_document) ---------------------------------
+
+static void FlattenPdfThread(SearchablePdfCtx* c) {
+    if (!c || !c->win || !c->doc || !c->ctx) {
+        SearchablePdfFinish(c);
+        return;
+    }
+    fz_try(c->ctx) {
+        pdf_bake_document(c->ctx, c->doc, /*bake_annots=*/1, /*bake_widgets=*/1);
+        c->ok = true;
+    } fz_catch(c->ctx) {
+        fz_report_error(c->ctx);
+        logf("FlattenPdfThread: failed for '%s'\n", c->dstPath ? c->dstPath.s : StrL("(null)"));
+        c->ok = false;
+    }
+    // Flatten saves into the same document object; write it out to dstPath.
+    fz_try(c->ctx) {
+        pdf_save_document(c->ctx, c->doc, CStrTemp(c->dstPath), nullptr);
+    } fz_catch(c->ctx) {
+        fz_report_error(c->ctx);
+        c->ok = false;
+    }
+    uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("FlattenPdfFinish"));
+}
+
+static void OnFlattenPdfPathPicked(SavePathArgs* args) {
+    MainWindow* win = args->win;
+    TempStr path = str::DupTemp(args->path);
+    str::Free(args->path);
+    args->path = {};
+    delete args;
+
+    if (len(path) == 0 || !IsMainWindowValidAndNotClosing(win)) {
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e || !e->_doc || !e->pdfdoc) {
+        ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
+        return;
+    }
+    fz_context* baseCtx = e->Ctx();
+    fz_try(baseCtx) {
+        fz_keep_document(baseCtx, e->_doc);
+    } fz_catch(baseCtx) {
+        fz_report_error(baseCtx);
+    }
+
+    auto* c = new SearchablePdfCtx();
+    c->win = win;
+    c->dstPath = str::Dup(path);
+    c->doc = e->_doc;
+    c->ctx = fz_clone_context(baseCtx);
+    if (!c->ctx) {
+        ShowTemporaryNotification(win, Tr("Failed to start flatten"), kNotif5SecsTimeOut);
+        str::Free(c->dstPath);
+        delete c;
+        return;
+    }
+    auto fn = MkFunc1Void(FlattenPdfThread, c);
+    RunAsync(fn, StrL("FlattenPdf"));
+}
+
+static void FlattenPdf(MainWindow* win) {
+    if (!CanAccessDisk() || !win->IsDocLoaded()) {
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e || !e->_doc || !e->pdfdoc) {
+        ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
+        return;
+    }
+    TempStr srcFileName = str::DupTemp(engine->FilePath());
+    TempStr seed = path::GetPathNoExtTemp(srcFileName);
+    seed = str::JoinTemp(seed, StrL(" Flattened.pdf"));
+    auto* args = new SavePathArgs();
+    args->win = win;
+    args->title = str::Dup(Tr("Flatten PDF..."));
+    args->initialPath = str::Dup(seed);
+    args->defExt = str::Dup(StrL(".pdf"));
+    args->onDone = MkFunc1(OnFlattenPdfPathPicked, args);
+    ShowSavePathDialog(args);
+}
+
+// --- end feedback / productivity commands ==================================
+
+// orig keeps its caches (the local cbx copies, the open-cache, the EUTL trust
     TempStr dstFileName = str::DupTemp(path::GetBaseNameTemp(srcFileName));
     int colonOff = str::IndexOfChar(dstFileName, ':');
     if (colonOff >= 0) {
@@ -5383,7 +5667,12 @@ void ExecuteCmd(MainWindow* win, int cmdId) {
 
         case CmdSaveAs:
             SaveCurrentFileAs(win);
-            break;
+        case CmdSaveLogAs:
+            SaveLogAs(win);
+        case CmdSaveAsSearchablePdf:
+            SaveAsSearchablePdf(win);
+        case CmdFlattenPdf:
+            FlattenPdf(win);
 
         case CmdSaveAnnotations:
             if (tab) {
