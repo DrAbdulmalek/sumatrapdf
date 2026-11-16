@@ -3498,7 +3498,7 @@ static void FlattenPdfThread(SearchablePdfCtx* c) {
         // keeps no ownership (borrowed view of c->doc) (P0-4).
         c->pdoc = pdf_document_from_fz_document(c->ctx, c->doc);
         if (!c->pdoc) {
-            fz_throw(c->ctx, FZ_ERROR_ARGUMENT, "not a PDF document: '%s'", c->srcPath.s);
+            fz_throw(c->ctx, FZ_ERROR_ARGUMENT, "worker snapshot is not a PDF document");
         }
         pdf_bake_document(c->ctx, c->pdoc, /*bake_annots=*/1, /*bake_widgets=*/1);
         // Bail out on bake failure: never save a half-flattened file.
