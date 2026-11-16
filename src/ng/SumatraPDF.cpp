@@ -32,6 +32,7 @@
 #include "DocController.h"
 #include "EngineBase.h"
 #include "EngineAll.h"
+#include "EngineMupdf.h"
 // MuPDF API for the OCR / Flatten workers below; PdfCad.h only forward-declares
 // the opaque types, so the fz_* / pdf_* functions are invisible without this.
 #include <mupdf/pdf.h>
@@ -3123,9 +3124,9 @@ static void SaveLogAs(MainWindow* win) {
 //    renamed to dstPath only after success (atomic save)
 struct SearchablePdfCtx {
     MainWindow* win = nullptr;
-    Str srcPath = nullptr; // owned: source file on disk, reopened by the worker
-    Str dstPath = nullptr; // owned: final destination
-    Str tmpPath = nullptr; // owned: temp output next to dstPath (same filesystem)
+    Str srcPath; // owned: source file on disk, reopened by the worker
+    Str dstPath; // owned: final destination
+    Str tmpPath; // owned: temp output next to dstPath (same filesystem)
     bool isFlatten = false;
     int pageCount = 0;
     int currentPage = 0;
@@ -3146,15 +3147,17 @@ static void SearchablePdfFreeCtx(SearchablePdfCtx* c) {
     delete c;
 }
 
-static void SearchablePdfProgress(fz_context* ctx, void* arg, int page, int percent) {
+static int SearchablePdfProgress(fz_context* ctx, void* arg, int page, int percent) {
     SearchablePdfCtx* c = (SearchablePdfCtx*)arg;
     if (!c || !c->win) {
-        return;
+        return 0;
     }
     // No per-page UI update needed here; completion is reported on finish.
+    // fz_pdfocr_progress_fn contract: return 0 to continue, 1 to cancel.
     (void)ctx;
     (void)page;
     (void)percent;
+    return 0;
 }
 
 static void SearchablePdfFinish(SearchablePdfCtx* c) {
@@ -3197,11 +3200,17 @@ static void SearchablePdfFinish(SearchablePdfCtx* c) {
         return;
     }
     if (c->ok && len(c->dstPath)) {
-        TempStr msg = c->isFlatten ? Tr("PDF flattened") : Tr("Searchable PDF saved");
-        ShowTemporaryNotification(win, msg, kNotif5SecsTimeOut);
+        if (c->isFlatten) {
+            ShowTemporaryNotification(win, Tr("PDF flattened"), kNotif5SecsTimeOut);
+        } else {
+            ShowTemporaryNotification(win, Tr("Searchable PDF saved"), kNotif5SecsTimeOut);
+        }
     } else {
-        TempStr msg = c->isFlatten ? Tr("Failed to flatten PDF") : Tr("Failed to create searchable PDF");
-        MessageBoxWarning(win, msg);
+        if (c->isFlatten) {
+            MessageBoxWarning(win, Tr("Failed to flatten PDF"));
+        } else {
+            MessageBoxWarning(win, Tr("Failed to create searchable PDF"));
+        }
     }
     SearchablePdfFreeCtx(c);
 }
@@ -3231,10 +3240,10 @@ static void SearchablePdfThread(SearchablePdfCtx* c) {
         c->ok = true;
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
-        logf("SearchablePdfThread: failed for '%s'\n", c->dstPath ? c->dstPath.s : StrL("(null)"));
+        logf("SearchablePdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath.s : "(null)");
         c->ok = false;
     }
-    uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("SearchablePdfFinish"));
+    uitask::Post(MkFunc0(SearchablePdfFinish, c), "SearchablePdfFinish");
 }
 
 static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
@@ -3282,8 +3291,7 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
         return;
     }
     fz_pdfocr_writer_set_progress(c->ctx, c->writer, SearchablePdfProgress, c);
-    auto fn = MkFunc1Void(SearchablePdfThread, c);
-    RunAsync(fn, StrL("SaveAsSearchablePdf"));
+    RunAsync(MkFunc0(SearchablePdfThread, c), StrL("SaveAsSearchablePdf"));
 }
 
 static void SaveAsSearchablePdf(MainWindow* win) {
@@ -3332,10 +3340,10 @@ static void FlattenPdfThread(SearchablePdfCtx* c) {
         c->ok = true;
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
-        logf("FlattenPdfThread: failed for '%s'\n", c->dstPath ? c->dstPath.s : StrL("(null)"));
+        logf("FlattenPdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath.s : "(null)");
         c->ok = false;
     }
-    uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("FlattenPdfFinish"));
+    uitask::Post(MkFunc0(SearchablePdfFinish, c), "FlattenPdfFinish");
 }
 
 static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
@@ -3372,8 +3380,7 @@ static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
         SearchablePdfFreeCtx(c);
         return;
     }
-    auto fn = MkFunc1Void(FlattenPdfThread, c);
-    RunAsync(fn, StrL("FlattenPdf"));
+    RunAsync(MkFunc0(FlattenPdfThread, c), StrL("FlattenPdf"));
 }
 
 static void FlattenPdf(MainWindow* win) {
