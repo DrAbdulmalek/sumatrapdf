@@ -8,7 +8,14 @@ Install the native build toolchain and Linux UI development packages:
 
 ```bash
 sudo pacman -S --needed base-devel git pkgconf nasm \
-  libx11 cairo pango gdk-pixbuf2 glib2 openssl
+  libx11 cairo pango gdk-pixbuf2 glib2 openssl \
+  fontconfig ttf-dejavu ttf-liberation noto-fonts
+```
+
+Refresh the font cache after installation:
+
+```bash
+fc-cache -f
 ```
 
 Bun must be available on `PATH`. Confirm the toolchain before building:
