@@ -3126,7 +3126,8 @@ static void SaveLogAs(MainWindow* win) {
 //    renamed to dstPath only after success (atomic save)
 struct SearchablePdfCtx {
     MainWindow* win = nullptr;
-    Str srcPath; // owned: source file on disk, reopened by the worker
+    Str srcPath; // display name for the in-memory snapshot
+    Str srcData; // owned, unencrypted snapshot of the live PDF including unsaved edits
     Str dstPath; // owned: final destination
     Str tmpPath; // owned: temp output next to dstPath (same filesystem)
     bool isFlatten = false;
@@ -3144,6 +3145,7 @@ static void SearchablePdfFreeCtx(SearchablePdfCtx* c) {
         return;
     }
     str::Free(c->srcPath);
+    str::Free(c->srcData);
     str::Free(c->dstPath);
     str::Free(c->tmpPath);
     delete c;
@@ -3237,15 +3239,29 @@ static void ValidatePdfOutput(fz_context* ctx, Str path) {
     }
 }
 
+static void SearchablePdfOpenSnapshot(SearchablePdfCtx* c, fz_buffer** bufferOut, fz_stream** streamOut) {
+    if (!c || !c->ctx || !c->srcData || len(c->srcData) == 0) {
+        fz_throw(c->ctx, FZ_ERROR_ARGUMENT, "empty PDF snapshot");
+    }
+    *bufferOut = fz_new_buffer_from_copied_data(c->ctx, (const unsigned char*)c->srcData.s, (size_t)len(c->srcData));
+    *streamOut = fz_open_buffer(c->ctx, *bufferOut);
+    const char* name = len(c->srcPath) ? CStrTemp(c->srcPath) : "snapshot.pdf";
+    c->doc = fz_open_document_with_stream(c->ctx, name, *streamOut);
+}
 static void SearchablePdfThread(SearchablePdfCtx* c) {
-    if (!c || !c->win || !c->ctx || !len(c->srcPath)) {
+    if (!c || !c->win || !c->ctx || !len(c->srcData)) {
         SearchablePdfFinish(c);
         return;
     }
+    fz_buffer* sourceBuffer = nullptr;
+    fz_stream* sourceStream = nullptr;
+    fz_var(sourceBuffer);
+    fz_var(sourceStream);
     fz_try(c->ctx) {
-        // Open an independent document owned by this worker (P0-5). The UI's
-        // EngineMupdf document is never touched from this thread.
-        c->doc = fz_open_document(c->ctx, CStrTemp(c->srcPath));
+        // Open a private in-memory snapshot of the live UI document. This
+        // preserves unsaved annotations and avoids reopening an encrypted or
+        // stale on-disk source. The snapshot is unencrypted only in memory.
+        SearchablePdfOpenSnapshot(c, &sourceBuffer, &sourceStream);
         int n = fz_count_pages(c->ctx, c->doc);
         c->pageCount = n;
         for (int i = 0; i < n; i++) {
@@ -3264,6 +3280,9 @@ static void SearchablePdfThread(SearchablePdfCtx* c) {
         fz_close_document_writer(c->ctx, c->writer);
         ValidatePdfOutput(c->ctx, c->tmpPath);
         c->ok = true;
+    } fz_always(c->ctx) {
+        fz_drop_stream(c->ctx, sourceStream);
+        fz_drop_buffer(c->ctx, sourceBuffer);
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
         logf("SearchablePdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath : StrL("(null)"));
@@ -3289,12 +3308,12 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     auto* c = new SearchablePdfCtx();
     c->win = win;
     c->srcPath = str::Dup(engine->FilePath());
+    c->srcData = EngineMupdfSnapshotPdfData(engine);
     c->dstPath = str::Dup(path);
     TempStr tempCandidate = fmt("%s.ocr-tmp", path);
     c->tmpPath = str::Dup(MakeUniqueFilePathTemp(tempCandidate));
-    if (!len(c->srcPath)) {
-        // e.g. a memory-loaded document has no file to reopen in the worker
-        ShowTemporaryNotification(win, Tr("Failed to start OCR"), kNotif5SecsTimeOut);
+    if (len(c->srcData) == 0) {
+        ShowTemporaryNotification(win, Tr("Failed to snapshot PDF for OCR"), kNotif5SecsTimeOut);
         SearchablePdfFreeCtx(c);
         return;
     }
@@ -3359,14 +3378,18 @@ static void SaveAsSearchablePdf(MainWindow* win) {
 // --- Flatten PDF (MuPDF pdf_bake_document) ---------------------------------
 
 static void FlattenPdfThread(SearchablePdfCtx* c) {
-    if (!c || !c->win || !c->ctx || !len(c->srcPath)) {
+    if (!c || !c->win || !c->ctx || !len(c->srcData)) {
         SearchablePdfFinish(c);
         return;
     }
+    fz_buffer* sourceBuffer = nullptr;
+    fz_stream* sourceStream = nullptr;
+    fz_var(sourceBuffer);
+    fz_var(sourceStream);
     fz_try(c->ctx) {
-        // Flatten must never mutate the document open in the reader (P0-6):
-        // reopen the source file in the worker and bake that copy.
-        c->doc = fz_open_document(c->ctx, CStrTemp(c->srcPath));
+        // Flatten the authenticated in-memory snapshot, including unsaved
+        // annotations; never mutate the open UI document.
+        SearchablePdfOpenSnapshot(c, &sourceBuffer, &sourceStream);
         // Official MuPDF down-cast; returns NULL for non-PDF documents and
         // keeps no ownership (borrowed view of c->doc) (P0-4).
         c->pdoc = pdf_document_from_fz_document(c->ctx, c->doc);
@@ -3378,6 +3401,9 @@ static void FlattenPdfThread(SearchablePdfCtx* c) {
         pdf_save_document(c->ctx, c->pdoc, CStrTemp(c->tmpPath), nullptr);
         ValidatePdfOutput(c->ctx, c->tmpPath);
         c->ok = true;
+    } fz_always(c->ctx) {
+        fz_drop_stream(c->ctx, sourceStream);
+        fz_drop_buffer(c->ctx, sourceBuffer);
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
         logf("FlattenPdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath : StrL("(null)"));
@@ -3407,9 +3433,8 @@ static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
     c->dstPath = str::Dup(path);
     TempStr tempCandidate = fmt("%s.flatten-tmp", path);
     c->tmpPath = str::Dup(MakeUniqueFilePathTemp(tempCandidate));
-    if (!len(c->srcPath)) {
-        // e.g. a memory-loaded document has no file to reopen in the worker
-        ShowTemporaryNotification(win, Tr("Failed to start flatten"), kNotif5SecsTimeOut);
+    if (len(c->srcData) == 0) {
+        ShowTemporaryNotification(win, Tr("Failed to snapshot PDF for flatten"), kNotif5SecsTimeOut);
         SearchablePdfFreeCtx(c);
         return;
     }
