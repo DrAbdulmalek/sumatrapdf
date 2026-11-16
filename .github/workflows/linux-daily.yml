@@ -99,12 +99,18 @@ jobs:
           retention-days: 7
 
   manjaro-compatible:
-    name: Arch Linux rolling build (Manjaro-compatible)
+    name: Manjaro Linux container build
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    container: manjarolinux/base:latest
     steps:
-      - name: install Manjaro-compatible build dependencies
-        run: pacman -Syu --noconfirm --needed base-devel git curl unzip file pkgconf libx11 cairo pango gdk-pixbuf2 glib2 openssl nasm
+      - name: initialize Manjaro and install build dependencies
+        run: |
+          pacman-key --init
+          pacman-mirrors --fasttrack 5
+          pacman -Syyu --noconfirm --needed archlinux-keyring manjaro-keyring
+          pacman-key --populate archlinux manjaro
+          pacman -S --noconfirm --needed base-devel git curl unzip file pkgconf libx11 cairo pango gdk-pixbuf2 glib2 openssl nasm
+          cat /etc/manjaro-release
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: test_util
