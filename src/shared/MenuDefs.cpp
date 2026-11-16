@@ -122,10 +122,16 @@ MenuDef menuDefFile[] = {
     {
         TrN("&Save As..."),
         CmdSaveAs,
+    },
+    {
         TrN("Save Log &As..."),
         CmdSaveLogAs,
+    },
+    {
         TrN("Save as &Searchable PDF..."),
         CmdSaveAsSearchablePdf,
+    },
+    {
         TrN("&Flatten PDF..."),
         CmdFlattenPdf,
     },
