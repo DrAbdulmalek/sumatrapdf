@@ -3300,8 +3300,7 @@ static void SaveAsSearchablePdf(MainWindow* win) {
     }
     DisplayModel* dm = win->AsFixed();
     EngineBase* engine = dm ? dm->GetEngine() : nullptr;
-    EngineMupdf* e = AsEngineMupdf(engine);
-    if (!e || !e->_doc) {
+    if (!EngineMupdfHasLoadedDocument(engine)) {
         ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
         return;
     }
@@ -3388,8 +3387,7 @@ static void FlattenPdf(MainWindow* win) {
     }
     DisplayModel* dm = win->AsFixed();
     EngineBase* engine = dm ? dm->GetEngine() : nullptr;
-    EngineMupdf* e = AsEngineMupdf(engine);
-    if (!e || !e->_doc || !e->pdfdoc) {
+    if (!EngineMupdfHasLoadedPdfDocument(engine)) {
         ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
         return;
     }
