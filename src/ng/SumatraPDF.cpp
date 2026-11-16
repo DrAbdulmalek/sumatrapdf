@@ -3290,7 +3290,8 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     c->win = win;
     c->srcPath = str::Dup(engine->FilePath());
     c->dstPath = str::Dup(path);
-    c->tmpPath = str::Dup(MakeUniqueFilePathTemp(path)); // unique, same-directory temp output
+    TempStr tempCandidate = fmt("%s.ocr-tmp", path);
+    c->tmpPath = str::Dup(MakeUniqueFilePathTemp(tempCandidate));
     if (!len(c->srcPath)) {
         // e.g. a memory-loaded document has no file to reopen in the worker
         ShowTemporaryNotification(win, Tr("Failed to start OCR"), kNotif5SecsTimeOut);
@@ -3404,7 +3405,8 @@ static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
     c->isFlatten = true;
     c->srcPath = str::Dup(engine->FilePath());
     c->dstPath = str::Dup(path);
-    c->tmpPath = str::Dup(MakeUniqueFilePathTemp(path)); // unique, same-directory temp output
+    TempStr tempCandidate = fmt("%s.flatten-tmp", path);
+    c->tmpPath = str::Dup(MakeUniqueFilePathTemp(tempCandidate));
     if (!len(c->srcPath)) {
         // e.g. a memory-loaded document has no file to reopen in the worker
         ShowTemporaryNotification(win, Tr("Failed to start flatten"), kNotif5SecsTimeOut);
