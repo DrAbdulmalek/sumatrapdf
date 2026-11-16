@@ -10580,6 +10580,53 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
     return ok;
 }
 
+// Create an authenticated, unencrypted in-memory snapshot of the current PDF.
+// This preserves unsaved edits and avoids persisting decrypted source bytes.
+Str EngineMupdfSnapshotPdfData(EngineBase* engine, fz_permission requiredPermission) {
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e || !e->pdfdoc) return {};
+    auto* ctx = e->Ctx();
+    if (!ctx) return {};
+    if (!pdf_has_permission(ctx, e->pdfdoc, requiredPermission)) {
+        logf("EngineMupdfSnapshotPdfData: PDF permission denied (required=%d)\\n", (int)requiredPermission);
+        return {};
+    }
+    ScopedRecursiveMutex pagesScope(&e->pagesLock);
+    ScopedMutex renderScope(&e->renderLock);
+    ScopedRecursiveMutex docScope(&e->docLock);
+    fz_buffer* buffer = nullptr;
+    fz_output* output = nullptr;
+    Str data;
+    bool ok = false;
+    fz_var(buffer);
+    fz_var(output);
+    fz_var(data);
+    fz_var(ok);
+    fz_try(ctx) {
+        buffer = fz_new_buffer(ctx, 1024 * 1024);
+        output = fz_new_output_with_buffer(ctx, buffer);
+        pdf_write_options opts = gPdfDefaultWriteOptions;
+        opts.do_incremental = 0;
+        opts.do_encrypt = PDF_ENCRYPT_NONE;
+        pdf_write_document(ctx, e->pdfdoc, output, &opts);
+        fz_close_output(ctx, output);
+        unsigned char* bytes = nullptr;
+        size_t size = fz_buffer_storage(ctx, buffer, &bytes);
+        if (size > INT_MAX) fz_throw(ctx, FZ_ERROR_LIMIT, "PDF snapshot exceeds supported in-memory size");
+        data = str::Dup(Str((const char*)bytes, (int)size));
+        ok = len(data) > 0;
+    }
+    fz_always(ctx) {
+        fz_drop_output(ctx, output);
+        fz_drop_buffer(ctx, buffer);
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        str::Free(data);
+        data = {};
+    }
+    return ok ? data : Str();
+}
 // Write a standalone (non-incremental) copy of the live PDF, including
 // unsaved annotations, without marking the document clean. Used so tools
 // that re-open the file from disk (bake) see the current session (issue #5977).
