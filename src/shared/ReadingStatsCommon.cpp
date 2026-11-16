@@ -23,7 +23,7 @@ i64 ReadingStatsDayIndexFromUnix(i64 unixTime) {
 }
 
 static int DayPos(const ReadingStatsData* d, i64 dayIndex) {
-    for (size_t i = 0; i < len(d->dayIndex); i++) {
+    for (int i = 0; i < len(d->dayIndex); i++) {
         if (d->dayIndex[i] == dayIndex) {
             return (int)i;
         }
@@ -63,7 +63,7 @@ void ReadingStatsAccumFile(ReadingStatsData* d, Str fileName, int seconds) {
     if (len(fileName) == 0) {
         return;
     }
-    for (size_t i = 0; i < len(d->fileNames); i++) {
+    for (int i = 0; i < len(d->fileNames); i++) {
         if (str::Eq(d->fileNames[i], fileName)) {
             d->fileSeconds[i] += seconds;
             return;
@@ -75,7 +75,7 @@ void ReadingStatsAccumFile(ReadingStatsData* d, Str fileName, int seconds) {
 
 void ReadingStatsFree(ReadingStatsData* d) {
     for (Str& s : d->fileNames) {
-        str::Free(s.s);
+        str::Free(s);
     }
     VecReset(d->fileNames);
     VecReset(d->fileSeconds);
@@ -110,13 +110,13 @@ int ReadingStatsHeatLevel(int daySeconds) {
 }
 
 void ReadingStatsSerialize(const ReadingStatsData* d, str::Builder* out) {
-    for (size_t i = 0; i < len(d->dayIndex); i++) {
+    for (int i = 0; i < len(d->dayIndex); i++) {
         out->Append(fmt("days %lld %d\n", d->dayIndex[i], d->seconds[i]));
     }
-    for (size_t i = 0; i < len(d->fileNames); i++) {
+    for (int i = 0; i < len(d->fileNames); i++) {
         // file names are single-line display names; replace any newline to
         // keep the TSV line-per-record format
-        TempStr name = str::ReplaceTemp(d->fileNames[i], "\n", " ");
+        TempStr name = str::ReplaceTemp(d->fileNames[i], StrL("\n"), StrL(" "));
         out->Append(StrL("files "));
         out->Append(name);
         out->Append(fmt(" %lld\n", d->fileSeconds[i]));
@@ -130,19 +130,19 @@ bool ReadingStatsParse(Str data, ReadingStatsData* d) {
     StrVec lines;
     Split(&lines, data, StrL("\n"), true);
     for (Str line : lines) {
-        if (len(line) == 0 || line[0] == '#') {
+        if (len(line) == 0 || line.s[0] == '#') {
             continue;
         }
         StrVec parts;
-        Split(&parts, line, StrL(" "), true);
+        Split(&parts, line, StrL(" "), true, 3);
         if (len(parts) < 2) {
             continue;
         }
-        if (str::Eq(parts[0], "days") && len(parts) == 3) {
+        if (str::Eq(parts[0], StrL("days")) && len(parts) == 3) {
             i64 day = ParseInt64(parts[1]);
             int secs = ParseInt(parts[2]);
             ReadingStatsAccumDay(d, day, secs);
-        } else if (str::Eq(parts[0], "files") && len(parts) == 3) {
+        } else if (str::Eq(parts[0], StrL("files")) && len(parts) == 3) {
             // name was saved with newlines replaced, so it can contain spaces:
             // max=3 keeps it whole in parts[1]
             i64 secs = ParseInt64(parts[2]);

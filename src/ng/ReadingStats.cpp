@@ -59,8 +59,8 @@ static void LoadStatsIfEmpty() {
     // keep the file from growing forever: days outside the last year are
     // merged into nothing (their minutes are still in the total on disk only)
     i64 today = ReadingStatsDayIndexFromUnix((i64)time(nullptr));
-    for (size_t i = len(gStats.dayIndex); i > 0; i--) {
-        size_t idx = i - 1;
+    for (int i = len(gStats.dayIndex); i > 0; i--) {
+        int idx = i - 1;
         if (today - gStats.dayIndex[idx] > kKeepDays) {
             VecRemoveAt(gStats.dayIndex, (int)idx);
             VecRemoveAt(gStats.seconds, (int)idx);
@@ -75,11 +75,14 @@ void ReadingStatsFlush() {
     str::Builder out;
     ReadingStatsSerialize(&gStats, &out);
     TempStr path = StatsFilePathTemp();
-    dir::CreateForFile(path);
     Str content = str::Dup(ToStrTemp(out));
-    file::WriteFile(path, content);
+    TempStr tempPath = MakeUniqueFilePathTemp(path);
+    bool saved = dir::CreateForFile(path) && file::WriteFile(tempPath, content) &&
+                 file::RenameReplace(path, tempPath);
+    if (!saved) file::Delete(tempPath);
     str::Free(content);
-    gUnsavedSecs = 0;
+    if (saved) gUnsavedSecs = 0;
+    else logf("ReadingStatsFlush: failed to persist stats; retaining pending seconds\\n");
 }
 
 void ReadingStatsTick(MainWindow* win, int elapsedMs) {
@@ -149,13 +152,13 @@ static gp::El* StatsHeatGrid(gp::Ctx* cx) {
 // newest first, at most kKeepFileRows entries; indices of the biggest rows
 static Vec<int> TopFileIdx() {
     Vec<int> idx;
-    for (size_t i = 0; i < len(gStats.fileNames); i++) {
+    for (int i = 0; i < len(gStats.fileNames); i++) {
         VecAppend(idx, (int)i);
     }
     // insertion sort by seconds, descending; the list is small
-    for (size_t i = 1; i < len(idx); i++) {
+    for (int i = 1; i < len(idx); i++) {
         int v = idx[i];
-        size_t j = i;
+        int j = i;
         while (j > 0 && gStats.fileSeconds[idx[j - 1]] < gStats.fileSeconds[v]) {
             idx[j] = idx[j - 1];
             j--;
@@ -163,7 +166,7 @@ static Vec<int> TopFileIdx() {
         idx[j] = v;
     }
     while (len(idx) > kKeepFileRows) {
-        VecRemoveAt(idx, len(idx) - 1);
+        VecRemoveAt(idx, (int)len(idx) - 1);
     }
     return idx;
 }
