@@ -32,9 +32,11 @@
 #include "DocController.h"
 #include "EngineBase.h"
 #include "EngineAll.h"
-#include "EngineMupdf.h"
 // MuPDF API for the OCR / Flatten workers below; PdfCad.h only forward-declares
 // the opaque types, so the fz_* / pdf_* functions are invisible without this.
+// (EngineMupdf internals are reached through the EngineAll.h helpers: the ng
+// amalgamation inlines headers in a fixed order, so including EngineMupdf.h
+// here breaks the generated build.)
 #include <mupdf/pdf.h>
 #include "DisplayModel.h"
 #include "PdfSync.h"
@@ -3254,14 +3256,12 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     }
     DisplayModel* dm = win->AsFixed();
     EngineBase* engine = dm ? dm->GetEngine() : nullptr;
-    EngineMupdf* e = AsEngineMupdf(engine);
-    if (!e || !e->_doc) {
+    if (!EngineMupdfHasLoadedDocument(engine)) {
         ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
         return;
     }
     // The worker reopens the source file in its own context, so nothing from
-    // the UI engine has to be kept alive here. fz_clone_context shares only
-    // the allocator/locks/store config, never document objects.
+    // the UI engine has to be kept alive here.
     auto* c = new SearchablePdfCtx();
     c->win = win;
     c->srcPath = str::Dup(engine->FilePath());
@@ -3274,7 +3274,7 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
         SearchablePdfFreeCtx(c);
         return;
     }
-    c->ctx = fz_clone_context(e->Ctx());
+    c->ctx = EngineMupdfCloneContextForWorker(engine);
     if (!c->ctx) {
         ShowTemporaryNotification(win, Tr("Failed to start OCR"), kNotif5SecsTimeOut);
         SearchablePdfFreeCtx(c);
@@ -3354,8 +3354,7 @@ static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
     }
     DisplayModel* dm = win->AsFixed();
     EngineBase* engine = dm ? dm->GetEngine() : nullptr;
-    EngineMupdf* e = AsEngineMupdf(engine);
-    if (!e || !e->_doc || !e->pdfdoc) {
+    if (!EngineMupdfHasLoadedPdfDocument(engine)) {
         ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
         return;
     }
@@ -3374,7 +3373,7 @@ static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
         SearchablePdfFreeCtx(c);
         return;
     }
-    c->ctx = fz_clone_context(e->Ctx());
+    c->ctx = EngineMupdfCloneContextForWorker(engine);
     if (!c->ctx) {
         ShowTemporaryNotification(win, Tr("Failed to start flatten"), kNotif5SecsTimeOut);
         SearchablePdfFreeCtx(c);
