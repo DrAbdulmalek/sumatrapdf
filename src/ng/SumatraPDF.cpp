@@ -3188,7 +3188,7 @@ static void SearchablePdfFinish(SearchablePdfCtx* c) {
     if (c->ok && len(c->tmpPath)) {
         // Atomic save: promote the temp file only after a fully successful run.
         if (!file::RenameReplace(c->dstPath, c->tmpPath)) {
-            logf("SearchablePdfFinish: rename '%s' -> '%s' failed\n", c->tmpPath.s, c->dstPath.s);
+            logf("SearchablePdfFinish: rename '%s' -> '%s' failed\n", c->tmpPath, c->dstPath);
             c->ok = false;
         }
     }
@@ -3242,7 +3242,7 @@ static void SearchablePdfThread(SearchablePdfCtx* c) {
         c->ok = true;
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
-        logf("SearchablePdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath.s : "(null)");
+        logf("SearchablePdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath : StrL("(null)"));
         c->ok = false;
     }
     uitask::Post(MkFunc0(SearchablePdfFinish, c), "SearchablePdfFinish");
@@ -3339,7 +3339,7 @@ static void FlattenPdfThread(SearchablePdfCtx* c) {
         c->ok = true;
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
-        logf("FlattenPdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath.s : "(null)");
+        logf("FlattenPdfThread: failed for '%s'\n", len(c->dstPath) ? c->dstPath : StrL("(null)"));
         c->ok = false;
     }
     uitask::Post(MkFunc0(SearchablePdfFinish, c), "FlattenPdfFinish");
