@@ -32,4 +32,7 @@ void AutoBackup_UnitTests() {
     utassert(prune[0] == 0 && prune[1] == 1);
     utassert(len(AutoBackupSelectPrune(8, 8)) == 0);
     utassert(len(AutoBackupSelectPrune(5, 0)) == 0);
+    utassert(AutoBackupLedgerNameIsSafe(StrL("SumatraPDF-settings-20261117-123456.txt")));
+    utassert(!AutoBackupLedgerNameIsSafe(StrL("../outside.txt")));
+    utassert(!AutoBackupLedgerNameIsSafe(StrL("SumatraPDF-settings-20261117-12345x.txt")));
 }

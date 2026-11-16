@@ -50,64 +50,99 @@ static void LoadBackupState() {
     str::Free(data);
 }
 
-static void SaveBackupState(i64 nowUnix) {
-    TempStr path = LastRunPathTemp();
-    dir::CreateForFile(path);
-    TempStr data = fmt("%lld\n", (long long)nowUnix);
-    Str s = str::Dup(data);
-    file::WriteFile(path, s);
-    str::Free(s);
+static TempStr MakeSiblingTempPath(Str path) {
+    // MakeUniqueFilePathTemp() returns the original path when it does not
+    // exist, so first append a distinct suffix to guarantee a sibling path.
+    TempStr candidate = fmt("%s.tmp", path);
+    return MakeUniqueFilePathTemp(candidate);
 }
 
-// appends the new name and deletes the oldest files beyond kKeepBackups
-static void RotateLedger(TempStr newName) {
+static bool WriteFileAtomically(Str path, Str data) {
+    TempStr tempPath = MakeSiblingTempPath(path);
+    if (!file::WriteFile(tempPath, data) || !file::RenameReplace(path, tempPath)) {
+        file::Delete(tempPath);
+        return false;
+    }
+    return true;
+}
+
+static bool SaveBackupState(i64 nowUnix) {
+    TempStr path = LastRunPathTemp();
+    if (!dir::CreateForFile(path)) return false;
+    TempStr data = fmt("%lld\n", (long long)nowUnix);
+    return WriteFileAtomically(path, data);
+}
+
+// Keep ledger slices valid until all uses complete; Split() returns views into
+// the original buffer. Commit the new ledger before pruning any old backup.
+static bool RotateLedger(TempStr newName) {
+    if (!AutoBackupLedgerNameIsSafe(newName)) return false;
     StrVec names;
+    Str ledgerData;
     TempStr ledgerPath = LedgerPathTemp();
     if (file::Exists(ledgerPath)) {
-        Str data = file::ReadFile(ledgerPath);
-        Split(&names, data, StrL("\n"), true);
-        str::Free(data);
+        ledgerData = file::ReadFile(ledgerPath);
+        if (len(ledgerData) == 0) { str::Free(ledgerData); return false; }
+        Split(&names, ledgerData, StrL("\n"), true);
     }
-    names.Append(str::Dup(newName));
-
-    Vec<int> toPrune = AutoBackupSelectPrune(len(names), kKeepBackups);
-    for (int i : toPrune) {
-        TempStr dead = path::JoinTemp(BackupDirTemp(), names[i]);
-        file::Delete(dead);
+    StrVec safeNames;
+    for (Str name : names) {
+        if (AutoBackupLedgerNameIsSafe(name)) safeNames.Append(name);
     }
+    safeNames.Append(newName);
+    Vec<int> toPrune = AutoBackupSelectPrune(len(safeNames), kKeepBackups);
     int firstKept = len(toPrune) > 0 ? toPrune[len(toPrune) - 1] + 1 : 0;
     str::Builder out;
-    for (int i = firstKept; i < len(names); i++) {
-        out.Append(names[i]);
+    for (int i = firstKept; i < len(safeNames); i++) {
+        out.Append(safeNames[i]);
         out.Append(StrL("\n"));
     }
-    dir::CreateForFile(ledgerPath);
-    Str content = str::Dup(ToStrTemp(out));
-    file::WriteFile(ledgerPath, content);
-    str::Free(content);
+    if (!dir::CreateForFile(ledgerPath) || !WriteFileAtomically(ledgerPath, ToStrTemp(out))) {
+        str::Free(ledgerData);
+        return false;
+    }
+    for (int i : toPrune) {
+        if (AutoBackupLedgerNameIsSafe(safeNames[i])) {
+            TempStr dead = path::JoinTemp(BackupDirTemp(), safeNames[i]);
+            file::Delete(dead);
+        }
+    }
+    str::Free(ledgerData);
+    return true;
 }
 
-static void AutoBackupRun() {
+static bool AutoBackupRun() {
     TempStr dir = BackupDirTemp();
     TempStr settingsPath = GetSettingsPathTemp();
     i64 nowUnix = (i64)time(nullptr);
-    TempStr name = AutoBackupStampNameTemp("SumatraPDF-settings", ".txt", nowUnix);
-    TempStr dst = path::JoinTemp(dir, name);
+    TempStr name;
+    TempStr dst;
+    for (int attempt = 0; attempt < 10; attempt++) {
+        name = AutoBackupStampNameTemp("SumatraPDF-settings", ".txt", nowUnix + attempt);
+        dst = path::JoinTemp(dir, name);
+        if (!file::Exists(dst)) { nowUnix += attempt; break; }
+        if (attempt == 9) return false;
+    }
     Str data = file::ReadFile(settingsPath);
-    if (len(data) == 0) {
-        str::Free(data);
-        return;
-    }
-    dir::CreateForFile(dst);
-    bool ok = file::WriteFile(dst, data);
+    if (len(data) == 0) { str::Free(data); return false; }
+    if (!dir::CreateForFile(dst)) { str::Free(data); return false; }
+    TempStr tempPath = MakeSiblingTempPath(dst);
+    bool ok = file::WriteFile(tempPath, data);
     str::Free(data);
-    if (!ok) {
+    if (!ok || !file::RenameReplace(dst, tempPath)) {
+        file::Delete(tempPath);
         logf("AutoBackup: writing '%s' failed\n", dst);
-        return;
+        return false;
     }
-    RotateLedger(name);
-    SaveBackupState(nowUnix);
+    if (!RotateLedger(name)) {
+        file::Delete(dst);
+        logf("AutoBackup: ledger update failed for '%s'\n", dst);
+        return false;
+    }
+    if (!SaveBackupState(nowUnix)) logf("AutoBackup: last-run state could not be persisted\n");
+    gLastRunUnix = nowUnix;
     logf("AutoBackup: saved '%s'\n", dst);
+    return true;
 }
 
 void AutoBackupTick(MainWindow* win, int elapsedMs) {

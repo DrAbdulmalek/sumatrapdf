@@ -34,29 +34,29 @@ int NoteKindFromAnnotationType(int annotationType) {
 TempStr NoteKindNameTemp(int kind) {
     switch (kind) {
         case kNoteKindHighlight:
-            return "Highlight";
+            return StrL("Highlight");
         case kNoteKindUnderline:
-            return "Underline";
+            return StrL("Underline");
         case kNoteKindSquiggly:
-            return "Squiggly";
+            return StrL("Squiggly");
         case kNoteKindStrikeOut:
-            return "Strike-out";
+            return StrL("Strike-out");
         case kNoteKindText:
-            return "Note";
+            return StrL("Note");
         case kNoteKindInk:
-            return "Ink";
+            return StrL("Ink");
         case kNoteKindStamp:
-            return "Stamp";
+            return StrL("Stamp");
         case kNoteKindCaret:
-            return "Caret";
+            return StrL("Caret");
     }
-    return "Annotation";
+    return StrL("Annotation");
 }
 
 static void MdAppendEscaped(str::Builder* out, Str s) {
     // escape the two sequences that would break list items or emphasis
-    TempStr esc1 = str::ReplaceTemp(s, "\r\n", " ");
-    TempStr esc2 = str::ReplaceTemp(esc1, "\n", " ");
+    TempStr esc1 = str::ReplaceTemp(s, StrL("\r\n"), StrL(" "));
+    TempStr esc2 = str::ReplaceTemp(esc1, StrL("\n"), StrL(" "));
     out->Append(esc2);
 }
 

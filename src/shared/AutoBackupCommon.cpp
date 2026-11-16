@@ -34,3 +34,15 @@ Vec<int> AutoBackupSelectPrune(int ledgerCount, int keepCount) {
     }
     return res;
 }
+
+bool AutoBackupLedgerNameIsSafe(Str name) {
+    constexpr Str prefix = StrL("SumatraPDF-settings-");
+    constexpr Str suffix = StrL(".txt");
+    if (len(name) != 39 || !str::StartsWith(name, prefix) || !str::EndsWith(name, suffix)) return false;
+    for (int i = len(prefix); i < len(name) - len(suffix); i++) {
+        char c = name.s[i];
+        if (i == len(prefix) + 8) { if (c != '-') return false; }
+        else if (c < '0' || c > '9') return false;
+    }
+    return true;
+}

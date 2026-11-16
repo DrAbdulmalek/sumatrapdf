@@ -13,3 +13,6 @@ TempStr AutoBackupStampNameTemp(const char* baseName, const char* ext, i64 unixT
 // which entries of a ledger (oldest first, as saved) have to be deleted to
 // keep at most keepCount backups; returns indices into the ledger
 Vec<int> AutoBackupSelectPrune(int ledgerCount, int keepCount);
+
+// Strictly validates the generated backup basename format; never accepts paths.
+bool AutoBackupLedgerNameIsSafe(Str name);

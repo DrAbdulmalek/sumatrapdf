@@ -24,6 +24,10 @@ jobs:
 
       - name: Build
         env:
+          # This is an independent fork with its own (short) linear git history.
+          # Upstream expects >10k commits for its release build numbering; the
+          # shallow-clone guard in getGitLinearVersion still runs regardless.
+          SUMATRA_BUILD_NUMBER_MIN: "1000"
           R2_SECRET: ${{ secrets.R2_SECRET }}
           R2_ACCESS: ${{ secrets.R2_ACCESS }}
           BB_SECRET: ${{ secrets.BB_SECRET }}
