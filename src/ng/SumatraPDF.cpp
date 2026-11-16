@@ -3167,8 +3167,9 @@ static void SearchablePdfFinish(SearchablePdfCtx* c) {
         return;
     }
     MainWindow* win = c->win;
+    // The writer is closed on its worker thread inside fz_try(), where close
+    // errors can be caught. UI-thread cleanup only drops the writer object.
     if (c->writer) {
-        fz_close_document_writer(c->ctx, c->writer);
         fz_drop_document_writer(c->ctx, c->writer);
         c->writer = nullptr;
     }
@@ -3217,6 +3218,25 @@ static void SearchablePdfFinish(SearchablePdfCtx* c) {
     SearchablePdfFreeCtx(c);
 }
 
+static void ValidatePdfOutput(fz_context* ctx, Str path) {
+    fz_document* verifyDoc = nullptr;
+    fz_var(verifyDoc);
+    fz_try(ctx) {
+        verifyDoc = fz_open_document(ctx, CStrTemp(path));
+        pdf_document* verifyPdf = pdf_document_from_fz_document(ctx, verifyDoc);
+        if (!verifyPdf) {
+            fz_throw(ctx, FZ_ERROR_ARGUMENT, "output is not a valid PDF: '%s'", path.s);
+        }
+        (void)fz_count_pages(ctx, verifyDoc);
+    }
+    fz_always(ctx) {
+        fz_drop_document(ctx, verifyDoc);
+    }
+    fz_catch(ctx) {
+        fz_rethrow(ctx);
+    }
+}
+
 static void SearchablePdfThread(SearchablePdfCtx* c) {
     if (!c || !c->win || !c->ctx || !len(c->srcPath)) {
         SearchablePdfFinish(c);
@@ -3239,6 +3259,10 @@ static void SearchablePdfThread(SearchablePdfCtx* c) {
             fz_end_page(c->ctx, c->writer);
             fz_drop_page(c->ctx, page);
         }
+        // Closing the writer finalizes its PDF trailer and can throw. Keep it
+        // inside this worker's fz_try so a failed close never promotes output.
+        fz_close_document_writer(c->ctx, c->writer);
+        ValidatePdfOutput(c->ctx, c->tmpPath);
         c->ok = true;
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
@@ -3266,8 +3290,7 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     c->win = win;
     c->srcPath = str::Dup(engine->FilePath());
     c->dstPath = str::Dup(path);
-    c->tmpPath = str::Join(path, StrL(".ocr-tmp"));
-    file::Delete(c->tmpPath); // remove stale temp from a previous run
+    c->tmpPath = str::Dup(MakeUniqueFilePathTemp(path)); // unique, same-directory temp output
     if (!len(c->srcPath)) {
         // e.g. a memory-loaded document has no file to reopen in the worker
         ShowTemporaryNotification(win, Tr("Failed to start OCR"), kNotif5SecsTimeOut);
@@ -3281,16 +3304,31 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
         return;
     }
     TempStr options = fmt("ocr-language=eng,compression=flate");
-    // Write to the temp path; SearchablePdfFinish renames it on success.
-    c->writer = fz_new_pdfocr_writer(c->ctx, CStrTemp(c->tmpPath), CStrTemp(options));
-    if (!c->writer) {
+    // Writer creation/configuration may throw in MuPDF; catch it before
+    // handing ownership to the asynchronous worker.
+    bool writerSetupOk = false;
+    fz_try(c->ctx) {
+        c->writer = fz_new_pdfocr_writer(c->ctx, CStrTemp(c->tmpPath), CStrTemp(options));
+        if (!c->writer) {
+            fz_throw(c->ctx, FZ_ERROR_GENERIC, "failed to create OCR writer");
+        }
+        fz_pdfocr_writer_set_progress(c->ctx, c->writer, SearchablePdfProgress, c);
+        writerSetupOk = true;
+    }
+    fz_catch(c->ctx) {
+        fz_report_error(c->ctx);
+    }
+    if (!writerSetupOk) {
+        if (c->writer) {
+            fz_drop_document_writer(c->ctx, c->writer);
+            c->writer = nullptr;
+        }
         ShowTemporaryNotification(win, Tr("Failed to start OCR writer"), kNotif5SecsTimeOut);
         fz_drop_context(c->ctx);
         c->ctx = nullptr;
         SearchablePdfFreeCtx(c);
         return;
     }
-    fz_pdfocr_writer_set_progress(c->ctx, c->writer, SearchablePdfProgress, c);
     RunAsync(MkFunc0(SearchablePdfThread, c), StrL("SaveAsSearchablePdf"));
 }
 
@@ -3336,6 +3374,7 @@ static void FlattenPdfThread(SearchablePdfCtx* c) {
         pdf_bake_document(c->ctx, c->pdoc, /*bake_annots=*/1, /*bake_widgets=*/1);
         // Bail out on bake failure: never save a half-flattened file.
         pdf_save_document(c->ctx, c->pdoc, CStrTemp(c->tmpPath), nullptr);
+        ValidatePdfOutput(c->ctx, c->tmpPath);
         c->ok = true;
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
@@ -3364,8 +3403,7 @@ static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
     c->isFlatten = true;
     c->srcPath = str::Dup(engine->FilePath());
     c->dstPath = str::Dup(path);
-    c->tmpPath = str::Join(path, StrL(".flatten-tmp"));
-    file::Delete(c->tmpPath);
+    c->tmpPath = str::Dup(MakeUniqueFilePathTemp(path)); // unique, same-directory temp output
     if (!len(c->srcPath)) {
         // e.g. a memory-loaded document has no file to reopen in the worker
         ShowTemporaryNotification(win, Tr("Failed to start flatten"), kNotif5SecsTimeOut);
