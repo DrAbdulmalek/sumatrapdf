@@ -54,15 +54,35 @@ TempStr NoteKindNameTemp(int kind) {
 }
 
 static void MdAppendEscaped(str::Builder* out, Str s) {
-    // escape the two sequences that would break list items or emphasis
-    TempStr esc1 = str::ReplaceTemp(s, StrL("\r\n"), StrL(" "));
-    TempStr esc2 = str::ReplaceTemp(esc1, StrL("\n"), StrL(" "));
-    out->Append(esc2);
+    // Collapse line breaks, encode HTML delimiters, and escape CommonMark
+    // punctuation so document titles/comments are emitted as literal text.
+    constexpr Str punctuation = StrL("!\"#$%&'()*+,-./:;<=>?@[\\\\]^_`{|}~");
+    for (int i = 0; i < len(s); i++) {
+        char c = s.s[i];
+        if (c == '\\r' || c == '\\n' || c == '\\t') {
+            out->AppendChar(' ');
+        } else if (c == '&') {
+            out->Append(StrL("&amp;"));
+        } else if (c == '<') {
+            out->Append(StrL("&lt;"));
+        } else if (c == '>') {
+            out->Append(StrL("&gt;"));
+        } else {
+            bool escape = false;
+            for (int j = 0; j < len(punctuation); j++) {
+                if (punctuation.s[j] == c) { escape = true; break; }
+            }
+            if (escape) out->AppendChar('\\\\');
+            out->AppendChar(c);
+        }
+    }
 }
 
 void BuildNotesMarkdown(const Vec<NoteItem>& notes, Str docName, i64 exportedOnUnix, str::Builder* out) {
     Str title = len(docName) > 0 ? docName : StrL("(no title)");
-    out->Append(fmt("# Notes — %s\n\n", title));
+    out->Append(StrL("# Notes — "));
+    MdAppendEscaped(out, title);
+    out->Append(StrL("\n\n"));
     time_t t = (time_t)exportedOnUnix;
     struct tm lt;
 #if OS_WIN

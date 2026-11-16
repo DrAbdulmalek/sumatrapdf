@@ -6,6 +6,8 @@
 // logic here; persistence is a small TSV file owned by the ng front end.
 
 struct ReadingStatsData {
+    // Accumulated seconds from days pruned out of the daily history.
+    i64 lifetimeSeconds = 0;
     // parallel arrays, one entry per day that has any reading time
     Vec<i64> dayIndex; // days since Unix epoch, local time
     Vec<int> seconds;
