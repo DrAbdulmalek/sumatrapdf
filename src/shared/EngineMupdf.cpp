@@ -10582,11 +10582,15 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
 
 // Create an authenticated, unencrypted in-memory snapshot of the current PDF.
 // This preserves unsaved edits and avoids persisting decrypted source bytes.
-Str EngineMupdfSnapshotPdfData(EngineBase* engine) {
+Str EngineMupdfSnapshotPdfData(EngineBase* engine, fz_permission requiredPermission) {
     EngineMupdf* e = AsEngineMupdf(engine);
     if (!e || !e->pdfdoc) return {};
     auto* ctx = e->Ctx();
     if (!ctx) return {};
+    if (!pdf_has_permission(ctx, e->pdfdoc, requiredPermission)) {
+        logf("EngineMupdfSnapshotPdfData: PDF permission denied (required=%d)\\n", (int)requiredPermission);
+        return {};
+    }
     ScopedRecursiveMutex pagesScope(&e->pagesLock);
     ScopedMutex renderScope(&e->renderLock);
     ScopedRecursiveMutex docScope(&e->docLock);

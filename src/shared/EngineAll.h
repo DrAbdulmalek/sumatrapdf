@@ -179,7 +179,7 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
 bool EngineMupdfSaveCopy(EngineBase* engine, Str path);
 // Snapshot current authenticated PDF state into an unencrypted in-memory byte buffer.
 // Includes unsaved annotations and does not mutate or save the open document.
-Str EngineMupdfSnapshotPdfData(EngineBase* engine);
+Str EngineMupdfSnapshotPdfData(EngineBase* engine, fz_permission requiredPermission);
 bool EngineMupdfSaveCropped(EngineBase* engine, Str path, const Vec<RectF>& cropBoxes);
 
 // digitally signing a PDF (SignDocumentDialog.cpp drives this)

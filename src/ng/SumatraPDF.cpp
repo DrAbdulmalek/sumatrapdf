@@ -3406,7 +3406,7 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     auto* c = new SearchablePdfCtx();
     c->win = win;
     c->srcPath = str::Dup(engine->FilePath());
-    c->srcData = EngineMupdfSnapshotPdfData(engine);
+    c->srcData = EngineMupdfSnapshotPdfData(engine, PDF_PERM_COPY);
     c->dstPath = str::Dup(path);
     TempStr tempCandidate = fmt("%s.ocr-tmp", path);
     c->tmpPath = str::Dup(MakeUniqueFilePathTemp(tempCandidate));
