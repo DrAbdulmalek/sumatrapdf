@@ -32,6 +32,9 @@
 #include "DocController.h"
 #include "EngineBase.h"
 #include "EngineAll.h"
+// MuPDF API for the OCR / Flatten workers below; PdfCad.h only forward-declares
+// the opaque types, so the fz_* / pdf_* functions are invisible without this.
+#include <mupdf/pdf.h>
 #include "DisplayModel.h"
 #include "PdfSync.h"
 #include "RenderCache.h"
@@ -3079,13 +3082,9 @@ static void SaveCurrentFileAs(MainWindow* win) {
 
 // Save the current application log to a user-chosen file, for feedback /
 // troubleshooting reports. Works even when no document is loaded.
-static void OnLogPathPicked(SavePathArgs* args) {
-    MainWindow* win = args->win;
+static void OnLogPathPicked(MainWindow* win, SavePathArgs* args) {
+    // args->path is valid only during onDone; the dialog deletes args itself.
     TempStr path = str::DupTemp(args->path);
-    str::Free(args->path);
-    args->path = {};
-    delete args;
-
     if (len(path) == 0 || !IsMainWindowValidAndNotClosing(win)) {
         return;
     }
@@ -3109,7 +3108,7 @@ static void SaveLogAs(MainWindow* win) {
     args->initialPath = str::Dup(seed);
     args->defExt = str::Dup(StrL(".txt"));
     args->noDefExt = true;
-    args->onDone = MkFunc1(OnLogPathPicked, args);
+    args->onDone = MkFunc1(OnLogPathPicked, win);
     ShowSavePathDialog(args);
 }
 
@@ -3238,13 +3237,9 @@ static void SearchablePdfThread(SearchablePdfCtx* c) {
     uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("SearchablePdfFinish"));
 }
 
-static void OnSearchablePdfPathPicked(SavePathArgs* args) {
-    MainWindow* win = args->win;
+static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
+    // args->path is valid only during onDone; the dialog deletes args itself.
     TempStr path = str::DupTemp(args->path);
-    str::Free(args->path);
-    args->path = {};
-    delete args;
-
     if (len(path) == 0 || !IsMainWindowValidAndNotClosing(win)) {
         return;
     }
@@ -3310,7 +3305,7 @@ static void SaveAsSearchablePdf(MainWindow* win) {
     args->title = str::Dup(Tr("Save as Searchable PDF..."));
     args->initialPath = str::Dup(seed);
     args->defExt = str::Dup(StrL(".pdf"));
-    args->onDone = MkFunc1(OnSearchablePdfPathPicked, args);
+    args->onDone = MkFunc1(OnSearchablePdfPathPicked, win);
     ShowSavePathDialog(args);
 }
 
@@ -3343,13 +3338,9 @@ static void FlattenPdfThread(SearchablePdfCtx* c) {
     uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("FlattenPdfFinish"));
 }
 
-static void OnFlattenPdfPathPicked(SavePathArgs* args) {
-    MainWindow* win = args->win;
+static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
+    // args->path is valid only during onDone; the dialog deletes args itself.
     TempStr path = str::DupTemp(args->path);
-    str::Free(args->path);
-    args->path = {};
-    delete args;
-
     if (len(path) == 0 || !IsMainWindowValidAndNotClosing(win)) {
         return;
     }
@@ -3404,7 +3395,7 @@ static void FlattenPdf(MainWindow* win) {
     args->title = str::Dup(Tr("Flatten PDF..."));
     args->initialPath = str::Dup(seed);
     args->defExt = str::Dup(StrL(".pdf"));
-    args->onDone = MkFunc1(OnFlattenPdfPathPicked, args);
+    args->onDone = MkFunc1(OnFlattenPdfPathPicked, win);
     ShowSavePathDialog(args);
 }
 
