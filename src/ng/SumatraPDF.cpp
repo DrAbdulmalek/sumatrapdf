@@ -3115,16 +3115,37 @@ static void SaveLogAs(MainWindow* win) {
 
 // --- Save as Searchable PDF (OCR) ------------------------------------------
 
+// Context for both "Save as Searchable PDF" (OCR) and "Flatten PDF" workers.
+// P0 safety rules (audit 2026-11-16):
+//  - the worker owns a fully independent fz_context and fz_document opened
+//    from srcPath; no object belonging to the reading UI (EngineMupdf::_doc /
+//    pdfdoc) is ever shared with the worker thread (P0-5 / P0-6)
+//  - output is written to tmpPath in the same directory and atomically
+//    renamed to dstPath only after success (atomic save)
 struct SearchablePdfCtx {
     MainWindow* win = nullptr;
-    Str dstPath; // owned
+    Str srcPath = nullptr; // owned: source file on disk, reopened by the worker
+    Str dstPath = nullptr; // owned: final destination
+    Str tmpPath = nullptr; // owned: temp output next to dstPath (same filesystem)
+    bool isFlatten = false;
     int pageCount = 0;
     int currentPage = 0;
     fz_document_writer* writer = nullptr;
-    fz_document* doc = nullptr;
-    fz_context* ctx = nullptr;
+    fz_document* doc = nullptr;   // worker-owned document
+    pdf_document* pdoc = nullptr; // borrowed down-cast of doc (flatten only)
+    fz_context* ctx = nullptr;    // worker-owned context
     bool ok = false;
 };
+
+static void SearchablePdfFreeCtx(SearchablePdfCtx* c) {
+    if (!c) {
+        return;
+    }
+    str::Free(c->srcPath);
+    str::Free(c->dstPath);
+    str::Free(c->tmpPath);
+    delete c;
+}
 
 static void SearchablePdfProgress(fz_context* ctx, void* arg, int page, int percent) {
     SearchablePdfCtx* c = (SearchablePdfCtx*)arg;
@@ -3148,28 +3169,53 @@ static void SearchablePdfFinish(SearchablePdfCtx* c) {
         c->writer = nullptr;
     }
     if (c->doc) {
-        fz_close_document(c->ctx, c->doc);
+        // fz_drop_document is the documented release call; fz_close_document
+        // does not exist in the bundled MuPDF (P0-3).
+        fz_drop_document(c->ctx, c->doc);
         c->doc = nullptr;
     }
+    // pdoc is a borrowed view of doc (pdf_document_from_fz_document keeps no
+    // ownership), so nothing to release here.
+    c->pdoc = nullptr;
     if (c->ctx) {
         fz_drop_context(c->ctx);
         c->ctx = nullptr;
     }
-    if (c->ok && len(c->dstPath)) {
-        ShowTemporaryNotification(win, Tr("Searchable PDF saved"), kNotif5SecsTimeOut);
-    } else {
-        MessageBoxWarning(win, Tr("Failed to create searchable PDF"));
+    if (c->ok && len(c->tmpPath)) {
+        // Atomic save: promote the temp file only after a fully successful run.
+        if (!file::RenameReplace(c->dstPath, c->tmpPath)) {
+            logf("SearchablePdfFinish: rename '%s' -> '%s' failed\n", c->tmpPath.s, c->dstPath.s);
+            c->ok = false;
+        }
     }
-    str::Free(c->dstPath);
-    delete c;
+    if (!c->ok && len(c->tmpPath)) {
+        // Never leave a partial output behind that looks complete.
+        file::Delete(c->tmpPath);
+    }
+    if (!IsMainWindowValidAndNotClosing(win)) {
+        // Window closed while processing: clean up silently (no UI calls).
+        SearchablePdfFreeCtx(c);
+        return;
+    }
+    if (c->ok && len(c->dstPath)) {
+        TempStr msg = c->isFlatten ? Tr("PDF flattened") : Tr("Searchable PDF saved");
+        ShowTemporaryNotification(win, msg, kNotif5SecsTimeOut);
+    } else {
+        TempStr msg = c->isFlatten ? Tr("Failed to flatten PDF") : Tr("Failed to create searchable PDF");
+        MessageBoxWarning(win, msg);
+    }
+    SearchablePdfFreeCtx(c);
 }
 
 static void SearchablePdfThread(SearchablePdfCtx* c) {
-    if (!c || !c->win || !c->doc || !c->ctx) {
+    if (!c || !c->win || !c->ctx || !len(c->srcPath)) {
         SearchablePdfFinish(c);
         return;
     }
     fz_try(c->ctx) {
+        // Open an independent document owned by this worker (P0-5). The UI's
+        // EngineMupdf document is never touched from this thread.
+        c->doc = fz_open_document(c->ctx, CStrTemp(c->srcPath));
         int n = fz_count_pages(c->ctx, c->doc);
         c->pageCount = n;
         for (int i = 0; i < n; i++) {
@@ -3209,33 +3255,35 @@ static void OnSearchablePdfPathPicked(SavePathArgs* args) {
         ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
         return;
     }
-    // Keep a stable reference to the document while the OCR thread runs.
-    fz_context* baseCtx = e->Ctx();
-    fz_try(baseCtx) {
-        fz_keep_document(baseCtx, e->_doc);
-    } fz_catch(baseCtx) {
-        fz_report_error(baseCtx);
-    }
-
+    // The worker reopens the source file in its own context, so nothing from
+    // the UI engine has to be kept alive here. fz_clone_context shares only
+    // the allocator/locks/store config, never document objects.
     auto* c = new SearchablePdfCtx();
     c->win = win;
+    c->srcPath = str::Dup(engine->FilePath());
     c->dstPath = str::Dup(path);
-    c->doc = e->_doc;
-    c->ctx = fz_clone_context(baseCtx);
+    c->tmpPath = str::Join(path, StrL(".ocr-tmp"));
+    file::Delete(c->tmpPath); // remove stale temp from a previous run
+    if (!len(c->srcPath)) {
+        // e.g. a memory-loaded document has no file to reopen in the worker
+        ShowTemporaryNotification(win, Tr("Failed to start OCR"), kNotif5SecsTimeOut);
+        SearchablePdfFreeCtx(c);
+        return;
+    }
+    c->ctx = fz_clone_context(e->Ctx());
     if (!c->ctx) {
         ShowTemporaryNotification(win, Tr("Failed to start OCR"), kNotif5SecsTimeOut);
-        str::Free(c->dstPath);
-        delete c;
+        SearchablePdfFreeCtx(c);
         return;
     }
     TempStr options = fmt("ocr-language=eng,compression=flate");
-    c->writer = fz_new_pdfocr_writer(c->ctx, CStrTemp(path), CStrTemp(options));
+    // Write to the temp path; SearchablePdfFinish renames it on success.
+    c->writer = fz_new_pdfocr_writer(c->ctx, CStrTemp(c->tmpPath), CStrTemp(options));
     if (!c->writer) {
         ShowTemporaryNotification(win, Tr("Failed to start OCR writer"), kNotif5SecsTimeOut);
         fz_drop_context(c->ctx);
         c->ctx = nullptr;
-        str::Free(c->dstPath);
-        delete c;
+        SearchablePdfFreeCtx(c);
         return;
     }
     fz_pdfocr_writer_set_progress(c->ctx, c->writer, SearchablePdfProgress, c);
@@ -3269,23 +3317,27 @@ static void SaveAsSearchablePdf(MainWindow* win) {
 // --- Flatten PDF (MuPDF pdf_bake_document) ---------------------------------
 
 static void FlattenPdfThread(SearchablePdfCtx* c) {
-    if (!c || !c->win || !c->doc || !c->ctx) {
+    if (!c || !c->win || !c->ctx || !len(c->srcPath)) {
         SearchablePdfFinish(c);
         return;
     }
     fz_try(c->ctx) {
-        pdf_bake_document(c->ctx, c->doc, /*bake_annots=*/1, /*bake_widgets=*/1);
+        // Flatten must never mutate the document open in the reader (P0-6):
+        // reopen the source file in the worker and bake that copy.
+        c->doc = fz_open_document(c->ctx, CStrTemp(c->srcPath));
+        // Official MuPDF down-cast; returns NULL for non-PDF documents and
+        // keeps no ownership (borrowed view of c->doc) (P0-4).
+        c->pdoc = pdf_document_from_fz_document(c->ctx, c->doc);
+        if (!c->pdoc) {
+            fz_throw(c->ctx, FZ_ERROR_ARGUMENT, "not a PDF document: '%s'", c->srcPath.s);
+        }
+        pdf_bake_document(c->ctx, c->pdoc, /*bake_annots=*/1, /*bake_widgets=*/1);
+        // Bail out on bake failure: never save a half-flattened file.
+        pdf_save_document(c->ctx, c->pdoc, CStrTemp(c->tmpPath), nullptr);
         c->ok = true;
     } fz_catch(c->ctx) {
         fz_report_error(c->ctx);
         logf("FlattenPdfThread: failed for '%s'\n", c->dstPath ? c->dstPath.s : StrL("(null)"));
-        c->ok = false;
-    }
-    // Flatten saves into the same document object; write it out to dstPath.
-    fz_try(c->ctx) {
-        pdf_save_document(c->ctx, c->doc, CStrTemp(c->dstPath), nullptr);
-    } fz_catch(c->ctx) {
-        fz_report_error(c->ctx);
         c->ok = false;
     }
     uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("FlattenPdfFinish"));
@@ -3308,22 +3360,25 @@ static void OnFlattenPdfPathPicked(SavePathArgs* args) {
         ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
         return;
     }
-    fz_context* baseCtx = e->Ctx();
-    fz_try(baseCtx) {
-        fz_keep_document(baseCtx, e->_doc);
-    } fz_catch(baseCtx) {
-        fz_report_error(baseCtx);
-    }
-
+    // Independent worker copy (see OnSearchablePdfPathPicked): the reading
+    // engine's document is left untouched, in memory and on disk.
     auto* c = new SearchablePdfCtx();
     c->win = win;
+    c->isFlatten = true;
+    c->srcPath = str::Dup(engine->FilePath());
     c->dstPath = str::Dup(path);
-    c->doc = e->_doc;
-    c->ctx = fz_clone_context(baseCtx);
+    c->tmpPath = str::Join(path, StrL(".flatten-tmp"));
+    file::Delete(c->tmpPath);
+    if (!len(c->srcPath)) {
+        // e.g. a memory-loaded document has no file to reopen in the worker
+        ShowTemporaryNotification(win, Tr("Failed to start flatten"), kNotif5SecsTimeOut);
+        SearchablePdfFreeCtx(c);
+        return;
+    }
+    c->ctx = fz_clone_context(e->Ctx());
     if (!c->ctx) {
         ShowTemporaryNotification(win, Tr("Failed to start flatten"), kNotif5SecsTimeOut);
-        str::Free(c->dstPath);
-        delete c;
+        SearchablePdfFreeCtx(c);
         return;
     }
     auto fn = MkFunc1Void(FlattenPdfThread, c);

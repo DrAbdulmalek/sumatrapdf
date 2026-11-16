@@ -275,12 +275,28 @@ export async function getGitSha1(): Promise<string> {
 }
 
 export async function getGitLinearVersion(): Promise<number> {
+  // Explicit shallow-clone guard: detects missing git history directly,
+  // independent of any commit-count threshold.
+  const procShallow = Bun.spawn(["git", "rev-parse", "--is-shallow-repository"], { stdout: "pipe", stderr: "inherit" });
+  const isShallow = (await new Response(procShallow.stdout).text()).trim();
+  await procShallow.exited;
+  if (isShallow === "true") {
+    throw new Error(`getGitLinearVersion: repository is a shallow clone (use fetch-depth: 0)`);
+  }
   const proc = Bun.spawn(["git", "log", "--oneline"], { stdout: "pipe", stderr: "inherit" });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
   const lines = out.split("\n").filter((l) => l.trim() !== "");
   const n = lines.length + 1000;
-  if (n < 10000) throw new Error(`getGitLinearVersion: n is ${n} (should be > 10000)`);
+  // Upstream derives release build numbers from its >10k commit history. This
+  // independent fork keeps its own shorter linear history, so the minimum is
+  // configurable via SUMATRA_BUILD_NUMBER_MIN; the default preserves the
+  // original upstream behavior.
+  const min = parseInt(process.env.SUMATRA_BUILD_NUMBER_MIN ?? "10000", 10);
+  if (!Number.isInteger(min) || min < 1) {
+    throw new Error(`getGitLinearVersion: invalid SUMATRA_BUILD_NUMBER_MIN '${process.env.SUMATRA_BUILD_NUMBER_MIN}'`);
+  }
+  if (n < min) throw new Error(`getGitLinearVersion: n is ${n} (should be > ${min})`);
   return n;
 }
 
