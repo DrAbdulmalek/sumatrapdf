@@ -50,8 +50,15 @@ static void LoadBackupState() {
     str::Free(data);
 }
 
+static TempStr MakeSiblingTempPath(Str path) {
+    // MakeUniqueFilePathTemp() returns the original path when it does not
+    // exist, so first append a distinct suffix to guarantee a sibling path.
+    TempStr candidate = fmt("%s.tmp", path);
+    return MakeUniqueFilePathTemp(candidate);
+}
+
 static bool WriteFileAtomically(Str path, Str data) {
-    TempStr tempPath = MakeUniqueFilePathTemp(path);
+    TempStr tempPath = MakeSiblingTempPath(path);
     if (!file::WriteFile(tempPath, data) || !file::RenameReplace(path, tempPath)) {
         file::Delete(tempPath);
         return false;
@@ -119,7 +126,7 @@ static bool AutoBackupRun() {
     Str data = file::ReadFile(settingsPath);
     if (len(data) == 0) { str::Free(data); return false; }
     if (!dir::CreateForFile(dst)) { str::Free(data); return false; }
-    TempStr tempPath = MakeUniqueFilePathTemp(dst);
+    TempStr tempPath = MakeSiblingTempPath(dst);
     bool ok = file::WriteFile(tempPath, data);
     str::Free(data);
     if (!ok || !file::RenameReplace(dst, tempPath)) {

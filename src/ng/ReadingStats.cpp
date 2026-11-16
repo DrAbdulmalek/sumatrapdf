@@ -76,7 +76,8 @@ void ReadingStatsFlush() {
     ReadingStatsSerialize(&gStats, &out);
     TempStr path = StatsFilePathTemp();
     Str content = str::Dup(ToStrTemp(out));
-    TempStr tempPath = MakeUniqueFilePathTemp(path);
+    TempStr tempCandidate = fmt("%s.tmp", path);
+    TempStr tempPath = MakeUniqueFilePathTemp(tempCandidate);
     bool saved = dir::CreateForFile(path) && file::WriteFile(tempPath, content) &&
                  file::RenameReplace(path, tempPath);
     if (!saved) file::Delete(tempPath);
