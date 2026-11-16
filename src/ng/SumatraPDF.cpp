@@ -3230,7 +3230,7 @@ static void ValidatePdfOutput(fz_context* ctx, Str path) {
         (void)fz_count_pages(ctx, verifyDoc);
     }
     fz_always(ctx) {
-        fz_drop_document(ctx, verifyDoc);
+        if (verifyDoc) fz_drop_document(ctx, verifyDoc);
     }
     fz_catch(ctx) {
         fz_rethrow(ctx);
@@ -3307,6 +3307,7 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     // Writer creation/configuration may throw in MuPDF; catch it before
     // handing ownership to the asynchronous worker.
     bool writerSetupOk = false;
+    fz_var(writerSetupOk);
     fz_try(c->ctx) {
         c->writer = fz_new_pdfocr_writer(c->ctx, CStrTemp(c->tmpPath), CStrTemp(options));
         if (!c->writer) {
