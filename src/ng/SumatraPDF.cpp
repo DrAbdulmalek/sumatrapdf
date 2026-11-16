@@ -3048,6 +3048,30 @@ static void SaveCurrentFileAs(MainWindow* win) {
     args->filter = str::Dup(ToStr(fileFilter));
 
     // note: no directory, so that the OS picks a reasonable default
+    TempStr dstFileName = str::DupTemp(path::GetBaseNameTemp(srcFileName));
+    int colonOff = str::IndexOfChar(dstFileName, ':');
+    if (colonOff >= 0) {
+        // handle embed-marks (for embedded PDF documents):
+        // remove the container document's extension and include
+        // the embedding reference in the suggested filename
+        TempStr mark = str::DupTemp(Str(dstFileName.s + colonOff, len(dstFileName) - colonOff));
+        str::TransCharsInPlace(mark, StrL(":"), StrL("_"));
+        int extOff = colonOff;
+        while (extOff > 0 && dstFileName.s[extOff] != '.') {
+            extOff--;
+        }
+        if (extOff == 0 && dstFileName.s[0] != '.') {
+            extOff = colonOff;
+        }
+        dstFileName = str::JoinTemp(Str(dstFileName.s, extOff), mark);
+    } else if (str::EndsWithI(dstFileName, defExt)) {
+        // Remove the extension so that it can be re-added depending on the chosen filter
+        dstFileName.len -= len(defExt);
+    }
+    args->nativeFile = str::Dup(dstFileName);
+    args->onDone = MkFunc1(OnSaveFileAsPathPicked, ctx);
+    ShowSavePathDialog(args);
+}
 
 // ===========================================================================
 // Feedback / productivity commands added for the Manjaro port
@@ -3330,32 +3354,6 @@ static void FlattenPdf(MainWindow* win) {
 }
 
 // --- end feedback / productivity commands ==================================
-
-// orig keeps its caches (the local cbx copies, the open-cache, the EUTL trust
-    TempStr dstFileName = str::DupTemp(path::GetBaseNameTemp(srcFileName));
-    int colonOff = str::IndexOfChar(dstFileName, ':');
-    if (colonOff >= 0) {
-        // handle embed-marks (for embedded PDF documents):
-        // remove the container document's extension and include
-        // the embedding reference in the suggested filename
-        TempStr mark = str::DupTemp(Str(dstFileName.s + colonOff, len(dstFileName) - colonOff));
-        str::TransCharsInPlace(mark, StrL(":"), StrL("_"));
-        int extOff = colonOff;
-        while (extOff > 0 && dstFileName.s[extOff] != '.') {
-            extOff--;
-        }
-        if (extOff == 0 && dstFileName.s[0] != '.') {
-            extOff = colonOff;
-        }
-        dstFileName = str::JoinTemp(Str(dstFileName.s, extOff), mark);
-    } else if (str::EndsWithI(dstFileName, defExt)) {
-        // Remove the extension so that it can be re-added depending on the chosen filter
-        dstFileName.len -= len(defExt);
-    }
-    args->nativeFile = str::Dup(dstFileName);
-    args->onDone = MkFunc1(OnSaveFileAsPathPicked, ctx);
-    ShowSavePathDialog(args);
-}
 
 // --- rename / delete / shortcut / cached files (orig SumatraPDF.cpp) -------
 
