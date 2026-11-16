@@ -5665,12 +5665,19 @@ void ExecuteCmd(MainWindow* win, int cmdId) {
 
         case CmdSaveAs:
             SaveCurrentFileAs(win);
+            break;
+
         case CmdSaveLogAs:
             SaveLogAs(win);
+            break;
+
         case CmdSaveAsSearchablePdf:
             SaveAsSearchablePdf(win);
+            break;
+
         case CmdFlattenPdf:
             FlattenPdf(win);
+            break;
 
         case CmdSaveAnnotations:
             if (tab) {
