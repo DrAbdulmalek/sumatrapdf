@@ -51,7 +51,7 @@ int ReadingStatsDaySeconds(const ReadingStatsData* d, i64 dayIndex) {
 }
 
 i64 ReadingStatsTotalSeconds(const ReadingStatsData* d) {
-    i64 total = 0;
+    i64 total = d->lifetimeSeconds;
     for (int s : d->seconds) {
         total += s;
     }
@@ -81,6 +81,7 @@ void ReadingStatsFree(ReadingStatsData* d) {
     VecReset(d->fileSeconds);
     VecReset(d->dayIndex);
     VecReset(d->seconds);
+    d->lifetimeSeconds = 0;
 }
 
 int ReadingStatsStreak(const ReadingStatsData* d, i64 todayIndex) {
@@ -110,6 +111,7 @@ int ReadingStatsHeatLevel(int daySeconds) {
 }
 
 void ReadingStatsSerialize(const ReadingStatsData* d, str::Builder* out) {
+    out->Append(fmt("total %lld\n", (long long)d->lifetimeSeconds));
     for (int i = 0; i < len(d->dayIndex); i++) {
         out->Append(fmt("days %lld %d\n", d->dayIndex[i], d->seconds[i]));
     }
@@ -138,7 +140,9 @@ bool ReadingStatsParse(Str data, ReadingStatsData* d) {
         if (len(parts) < 2) {
             continue;
         }
-        if (str::Eq(parts[0], StrL("days")) && len(parts) == 3) {
+        if (str::Eq(parts[0], StrL("total")) && len(parts) == 2) {
+            d->lifetimeSeconds = std::max<i64>(0, ParseInt64(parts[1]));
+        } else if (str::Eq(parts[0], StrL("days")) && len(parts) == 3) {
             i64 day = ParseInt64(parts[1]);
             int secs = ParseInt(parts[2]);
             ReadingStatsAccumDay(d, day, secs);
@@ -149,5 +153,5 @@ bool ReadingStatsParse(Str data, ReadingStatsData* d) {
             ReadingStatsAccumFile(d, parts[1], (int)secs);
         }
     }
-    return len(d->dayIndex) > 0 || len(d->fileNames) > 0;
+    return len(d->dayIndex) > 0 || len(d->fileNames) > 0 || d->lifetimeSeconds > 0;
 }

@@ -45,11 +45,16 @@ void ReadingStats_UnitTests() {
     ReadingStatsAccumFile(&data, StrL("other.pdf"), 5);
     utassert(len(data.fileNames) == 2);
 
+    data.lifetimeSeconds = 86400;
+    utassert(ReadingStatsTotalSeconds(&data) == 86400 + 90 + 120 + 10);
+
     // serialize -> parse round trip
     str::Builder out;
     ReadingStatsSerialize(&data, &out);
     ReadingStatsData parsed;
     utassert(ReadingStatsParse(ToStrTemp(out), &parsed));
+    utassert(parsed.lifetimeSeconds == 86400);
+    utassert(ReadingStatsTotalSeconds(&parsed) == 86400 + 90 + 120 + 10);
     utassert(ReadingStatsDaySeconds(&parsed, d1) == 90);
     utassert(ReadingStatsDaySeconds(&parsed, d1 + 1) == 120);
     utassert(len(parsed.fileNames) == 2);

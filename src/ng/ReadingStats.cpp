@@ -41,13 +41,14 @@ static constexpr int kKeepFileRows = 8; // per-file rows shown in the dialog
 static ReadingStatsData gStats;
 static int gPendingMs = 0;
 static int gUnsavedSecs = 0;
+static bool gStatsDirty = false;
 
 static TempStr StatsFilePathTemp() {
     return path::JoinTemp(GetAppDataDirTemp(), StrL("reading-stats.tsv"));
 }
 
 static void LoadStatsIfEmpty() {
-    if (len(gStats.dayIndex) > 0 || len(gStats.fileNames) > 0) {
+    if (len(gStats.dayIndex) > 0 || len(gStats.fileNames) > 0 || gStats.lifetimeSeconds > 0) {
         return;
     }
     TempStr path = StatsFilePathTemp();
@@ -57,11 +58,13 @@ static void LoadStatsIfEmpty() {
     }
     str::Free(data);
     // keep the file from growing forever: days outside the last year are
-    // merged into nothing (their minutes are still in the total on disk only)
+    // moved into lifetimeSeconds so Total remains cumulative.
     i64 today = ReadingStatsDayIndexFromUnix((i64)time(nullptr));
     for (int i = len(gStats.dayIndex); i > 0; i--) {
         int idx = i - 1;
         if (today - gStats.dayIndex[idx] > kKeepDays) {
+            gStats.lifetimeSeconds += gStats.seconds[idx];
+            gStatsDirty = true;
             VecRemoveAt(gStats.dayIndex, (int)idx);
             VecRemoveAt(gStats.seconds, (int)idx);
         }
@@ -69,7 +72,7 @@ static void LoadStatsIfEmpty() {
 }
 
 void ReadingStatsFlush() {
-    if (gUnsavedSecs <= 0) {
+    if (gUnsavedSecs <= 0 && !gStatsDirty) {
         return;
     }
     str::Builder out;
@@ -82,12 +85,12 @@ void ReadingStatsFlush() {
                  file::RenameReplace(path, tempPath);
     if (!saved) file::Delete(tempPath);
     str::Free(content);
-    if (saved) gUnsavedSecs = 0;
+    if (saved) { gUnsavedSecs = 0; gStatsDirty = false; }
     else logf("ReadingStatsFlush: failed to persist stats; retaining pending seconds\\n");
 }
 
 void ReadingStatsTick(MainWindow* win, int elapsedMs) {
-    if (!IsMainWindowValidAndNotClosing(win) || win->wasMinimized) {
+    if (!IsMainWindowValidAndNotClosing(win) || win->wasMinimized || !win->gpuiWin || !win->gpuiWin->active) {
         return;
     }
     WindowTab* tab = ActiveTab(win);
@@ -194,7 +197,7 @@ static gp::El* StatsToolBuild(MainWindow* win, gp::Ctx* cx) {
     panel->Child(StatsRow(cx, Tr("Streak"), streakStr));
     i64 total = ReadingStatsTotalSeconds(&gStats);
     TempStr totalStr = fmt("%lld h %lld min", (long long)(total / 3600), (long long)((total / 60) % 60));
-    panel->Child(StatsRow(cx, Tr("Total"), totalStr));
+    panel->Child(StatsRow(cx, Tr("Total (lifetime)"), totalStr));
 
     panel->Child(gp::TextEl(cx->a, GpuiDup(cx->a, Tr("Last 12 weeks")))->Font(13)->Bold()->Fg(th.foreground));
     panel->Child(StatsHeatGrid(cx));
