@@ -153,5 +153,5 @@ bool ReadingStatsParse(Str data, ReadingStatsData* d) {
             ReadingStatsAccumFile(d, parts[1], (int)secs);
         }
     }
-    return len(d->dayIndex) > 0 || len(d->fileNames) > 0;
+    return len(d->dayIndex) > 0 || len(d->fileNames) > 0 || d->lifetimeSeconds > 0;
 }

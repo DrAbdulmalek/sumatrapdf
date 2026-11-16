@@ -54,13 +54,13 @@ void NotesExport_UnitTests() {
     NoteItem hn;
     hn.pageNo = 1;
     hn.kind = kNoteKindText;
-    hn.comment = str::Dup(StrL("**bold** [link](javascript:alert(1)) <script> & \\\"quote\\\""));
+    hn.comment = str::Dup(StrL("**bold** [link](javascript:alert(1)) <script> & amp"));
     VecAppend(hostile, hn);
     str::Builder hostileOut;
     BuildNotesMarkdown(hostile, StrL("# title [x](url)"), 0, &hostileOut);
     Str hostileMd = ToStrTemp(hostileOut);
-    utassert(str::Contains(hostileMd, StrL("\\\\# title \\\\[x\\\\]\\\\(url\\\\)")));
-    utassert(str::Contains(hostileMd, StrL("\\\\*\\\\*bold\\\\*\\\\*")));
+    utassert(str::Contains(hostileMd, StrL("\\# title \\[x\\]\\(url\\)")));
+    utassert(str::Contains(hostileMd, StrL("\\*\\*bold\\*\\*")));
     utassert(str::Contains(hostileMd, StrL("&lt;script&gt;")));
     utassert(!str::Contains(hostileMd, StrL("<script>")));
     NotesExportFreeItems(hostile);

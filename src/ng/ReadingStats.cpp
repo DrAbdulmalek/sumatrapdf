@@ -48,7 +48,7 @@ static TempStr StatsFilePathTemp() {
 }
 
 static void LoadStatsIfEmpty() {
-    if (len(gStats.dayIndex) > 0 || len(gStats.fileNames) > 0) {
+    if (len(gStats.dayIndex) > 0 || len(gStats.fileNames) > 0 || gStats.lifetimeSeconds > 0) {
         return;
     }
     TempStr path = StatsFilePathTemp();
@@ -58,7 +58,7 @@ static void LoadStatsIfEmpty() {
     }
     str::Free(data);
     // keep the file from growing forever: days outside the last year are
-    // merged into nothing (their minutes are still in the total on disk only)
+    // moved into lifetimeSeconds so Total remains cumulative.
     i64 today = ReadingStatsDayIndexFromUnix((i64)time(nullptr));
     for (int i = len(gStats.dayIndex); i > 0; i--) {
         int idx = i - 1;

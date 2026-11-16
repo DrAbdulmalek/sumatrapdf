@@ -56,10 +56,10 @@ TempStr NoteKindNameTemp(int kind) {
 static void MdAppendEscaped(str::Builder* out, Str s) {
     // Collapse line breaks, encode HTML delimiters, and escape CommonMark
     // punctuation so document titles/comments are emitted as literal text.
-    constexpr Str punctuation = StrL("!\"#$%&'()*+,-./:;<=>?@[\\\\]^_`{|}~");
+    constexpr Str punctuation = StrL("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~");
     for (int i = 0; i < len(s); i++) {
         char c = s.s[i];
-        if (c == '\\r' || c == '\\n' || c == '\\t') {
+        if (c == '\r' || c == '\n' || c == '\t') {
             out->AppendChar(' ');
         } else if (c == '&') {
             out->Append(StrL("&amp;"));
@@ -72,7 +72,7 @@ static void MdAppendEscaped(str::Builder* out, Str s) {
             for (int j = 0; j < len(punctuation); j++) {
                 if (punctuation.s[j] == c) { escape = true; break; }
             }
-            if (escape) out->AppendChar('\\\\');
+            if (escape) out->AppendChar('\\');
             out->AppendChar(c);
         }
     }
