@@ -23,6 +23,9 @@
 #include "base/Win.h"
 #include "base/WinDynCalls.h"
 
+// the searchable-PDF (OCR) writer below uses MuPDF types directly
+#include <mupdf/pdf.h>
+
 #include "gui/UIModels.h"
 
 #include "Settings.h"
@@ -32,6 +35,7 @@
 #include "DocController.h"
 #include "EngineBase.h"
 #include "EngineAll.h"
+#include "EngineMupdf.h"
 #include "DisplayModel.h"
 #include "PdfSync.h"
 #include "RenderCache.h"
@@ -49,6 +53,8 @@
 #include "ChmDump.h"
 #include "ExifDump.h"
 #include "Commands.h"
+#include "NotesExport.h"
+#include "ReadingStats.h"
 #include "ShortcutParse.h"
 #include "Accelerators.h"
 #include "Translations.h"
@@ -3079,8 +3085,8 @@ static void SaveCurrentFileAs(MainWindow* win) {
 
 // Save the current application log to a user-chosen file, for feedback /
 // troubleshooting reports. Works even when no document is loaded.
-static void OnLogPathPicked(SavePathArgs* args) {
-    MainWindow* win = args->win;
+// MkFunc1 hands back (win, args); the main window is the context
+static void OnLogPathPicked(MainWindow* win, SavePathArgs* args) {
     TempStr path = str::DupTemp(args->path);
     str::Free(args->path);
     args->path = {};
@@ -3109,7 +3115,7 @@ static void SaveLogAs(MainWindow* win) {
     args->initialPath = str::Dup(seed);
     args->defExt = str::Dup(StrL(".txt"));
     args->noDefExt = true;
-    args->onDone = MkFunc1(OnLogPathPicked, args);
+    args->onDone = MkFunc1(OnLogPathPicked, win);
     ShowSavePathDialog(args);
 }
 
@@ -3126,15 +3132,17 @@ struct SearchablePdfCtx {
     bool ok = false;
 };
 
-static void SearchablePdfProgress(fz_context* ctx, void* arg, int page, int percent) {
+static int SearchablePdfProgress(fz_context* ctx, void* arg, int page, int percent) {
     SearchablePdfCtx* c = (SearchablePdfCtx*)arg;
     if (!c || !c->win) {
-        return;
+        return 1;
     }
     // No per-page UI update needed here; completion is reported on finish.
     (void)ctx;
     (void)page;
     (void)percent;
+    // non-zero keeps the OCR writer going
+    return 1;
 }
 
 static void SearchablePdfFinish(SearchablePdfCtx* c) {
@@ -3148,7 +3156,7 @@ static void SearchablePdfFinish(SearchablePdfCtx* c) {
         c->writer = nullptr;
     }
     if (c->doc) {
-        fz_close_document(c->ctx, c->doc);
+        fz_drop_document(c->ctx, c->doc);
         c->doc = nullptr;
     }
     if (c->ctx) {
@@ -3166,7 +3174,7 @@ static void SearchablePdfFinish(SearchablePdfCtx* c) {
 
 static void SearchablePdfThread(SearchablePdfCtx* c) {
     if (!c || !c->win || !c->doc || !c->ctx) {
-        SearchablePdfFinish(c);
+        uitask::Post(MkFunc0(SearchablePdfFinish, c), "SearchablePdfFinish");
         return;
     }
     fz_try(c->ctx) {
@@ -3184,16 +3192,17 @@ static void SearchablePdfThread(SearchablePdfCtx* c) {
             fz_drop_page(c->ctx, page);
         }
         c->ok = true;
-    } fz_catch(c->ctx) {
+    }
+    fz_catch(c->ctx) {
         fz_report_error(c->ctx);
-        logf("SearchablePdfThread: failed for '%s'\n", c->dstPath ? c->dstPath.s : StrL("(null)"));
+        Str dst = len(c->dstPath) > 0 ? c->dstPath : StrL("(null)");
+        logf("SearchablePdfThread: failed for '%s'\n", dst);
         c->ok = false;
     }
-    uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("SearchablePdfFinish"));
+    uitask::Post(MkFunc0(SearchablePdfFinish, c), "SearchablePdfFinish");
 }
 
-static void OnSearchablePdfPathPicked(SavePathArgs* args) {
-    MainWindow* win = args->win;
+static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     TempStr path = str::DupTemp(args->path);
     str::Free(args->path);
     args->path = {};
@@ -3213,7 +3222,8 @@ static void OnSearchablePdfPathPicked(SavePathArgs* args) {
     fz_context* baseCtx = e->Ctx();
     fz_try(baseCtx) {
         fz_keep_document(baseCtx, e->_doc);
-    } fz_catch(baseCtx) {
+    }
+    fz_catch(baseCtx) {
         fz_report_error(baseCtx);
     }
 
@@ -3239,7 +3249,7 @@ static void OnSearchablePdfPathPicked(SavePathArgs* args) {
         return;
     }
     fz_pdfocr_writer_set_progress(c->ctx, c->writer, SearchablePdfProgress, c);
-    auto fn = MkFunc1Void(SearchablePdfThread, c);
+    auto fn = MkFunc0(SearchablePdfThread, c);
     RunAsync(fn, StrL("SaveAsSearchablePdf"));
 }
 
@@ -3262,7 +3272,7 @@ static void SaveAsSearchablePdf(MainWindow* win) {
     args->title = str::Dup(Tr("Save as Searchable PDF..."));
     args->initialPath = str::Dup(seed);
     args->defExt = str::Dup(StrL(".pdf"));
-    args->onDone = MkFunc1(OnSearchablePdfPathPicked, args);
+    args->onDone = MkFunc1(OnSearchablePdfPathPicked, win);
     ShowSavePathDialog(args);
 }
 
@@ -3274,25 +3284,30 @@ static void FlattenPdfThread(SearchablePdfCtx* c) {
         return;
     }
     fz_try(c->ctx) {
-        pdf_bake_document(c->ctx, c->doc, /*bake_annots=*/1, /*bake_widgets=*/1);
+        // bake needs the pdf-specific handle, not the generic fz_document
+        pdf_document* pdoc = pdf_document_from_fz_document(c->ctx, c->doc);
+        pdf_bake_document(c->ctx, pdoc, /*bake_annots=*/1, /*bake_widgets=*/1);
         c->ok = true;
-    } fz_catch(c->ctx) {
+    }
+    fz_catch(c->ctx) {
         fz_report_error(c->ctx);
-        logf("FlattenPdfThread: failed for '%s'\n", c->dstPath ? c->dstPath.s : StrL("(null)"));
+        Str dst = len(c->dstPath) > 0 ? c->dstPath : StrL("(null)");
+        logf("FlattenPdfThread: failed for '%s'\n", dst);
         c->ok = false;
     }
     // Flatten saves into the same document object; write it out to dstPath.
     fz_try(c->ctx) {
-        pdf_save_document(c->ctx, c->doc, CStrTemp(c->dstPath), nullptr);
-    } fz_catch(c->ctx) {
+        pdf_document* pdoc = pdf_document_from_fz_document(c->ctx, c->doc);
+        pdf_save_document(c->ctx, pdoc, CStrTemp(c->dstPath), nullptr);
+    }
+    fz_catch(c->ctx) {
         fz_report_error(c->ctx);
         c->ok = false;
     }
-    uitask::Post(MkFunc1Void(SearchablePdfFinish, c), StrL("FlattenPdfFinish"));
+    uitask::Post(MkFunc0(SearchablePdfFinish, c), "FlattenPdfFinish");
 }
 
-static void OnFlattenPdfPathPicked(SavePathArgs* args) {
-    MainWindow* win = args->win;
+static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
     TempStr path = str::DupTemp(args->path);
     str::Free(args->path);
     args->path = {};
@@ -3311,7 +3326,8 @@ static void OnFlattenPdfPathPicked(SavePathArgs* args) {
     fz_context* baseCtx = e->Ctx();
     fz_try(baseCtx) {
         fz_keep_document(baseCtx, e->_doc);
-    } fz_catch(baseCtx) {
+    }
+    fz_catch(baseCtx) {
         fz_report_error(baseCtx);
     }
 
@@ -3326,7 +3342,7 @@ static void OnFlattenPdfPathPicked(SavePathArgs* args) {
         delete c;
         return;
     }
-    auto fn = MkFunc1Void(FlattenPdfThread, c);
+    auto fn = MkFunc0(FlattenPdfThread, c);
     RunAsync(fn, StrL("FlattenPdf"));
 }
 
@@ -3349,7 +3365,7 @@ static void FlattenPdf(MainWindow* win) {
     args->title = str::Dup(Tr("Flatten PDF..."));
     args->initialPath = str::Dup(seed);
     args->defExt = str::Dup(StrL(".pdf"));
-    args->onDone = MkFunc1(OnFlattenPdfPathPicked, args);
+    args->onDone = MkFunc1(OnFlattenPdfPathPicked, win);
     ShowSavePathDialog(args);
 }
 
@@ -5665,12 +5681,22 @@ void ExecuteCmd(MainWindow* win, int cmdId) {
 
         case CmdSaveAs:
             SaveCurrentFileAs(win);
+            break;
         case CmdSaveLogAs:
             SaveLogAs(win);
+            break;
         case CmdSaveAsSearchablePdf:
             SaveAsSearchablePdf(win);
+            break;
         case CmdFlattenPdf:
             FlattenPdf(win);
+            break;
+        case CmdReadingStats:
+            ReadingStatsShowDialog(win);
+            break;
+        case CmdExportNotesMd:
+            ExportNotesMd(win);
+            break;
 
         case CmdSaveAnnotations:
             if (tab) {

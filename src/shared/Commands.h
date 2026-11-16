@@ -379,8 +379,10 @@ enum {
     CmdSaveLogAs = 573,
     CmdSaveAsSearchablePdf = 574,
     CmdFlattenPdf = 575,
+    CmdReadingStats = 576,
+    CmdExportNotesMd = 577,
 
-    CmdLast = 575,
+    CmdLast = 577,
     CmdFirstCustom = CmdLast + 100,
 
     // aliases, at the end to not mess ordering
