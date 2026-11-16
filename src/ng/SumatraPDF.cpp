@@ -3241,13 +3241,12 @@ static void ValidatePdfOutput(fz_context* ctx, Str path) {
 
 static void SearchablePdfOpenSnapshot(SearchablePdfCtx* c, fz_buffer** bufferOut, fz_stream** streamOut) {
     if (!c || !c->ctx) return;
-    if (!c->srcData || len(c->srcData) == 0) {
+    if (len(c->srcData) == 0) {
         fz_throw(c->ctx, FZ_ERROR_ARGUMENT, "empty PDF snapshot");
     }
     *bufferOut = fz_new_buffer_from_copied_data(c->ctx, (const unsigned char*)c->srcData.s, (size_t)len(c->srcData));
     *streamOut = fz_open_buffer(c->ctx, *bufferOut);
-    const char* name = len(c->srcPath) ? CStrTemp(c->srcPath) : "snapshot.pdf";
-    c->doc = fz_open_document_with_stream(c->ctx, name, *streamOut);
+    c->doc = fz_open_document_with_stream(c->ctx, "snapshot.pdf", *streamOut);
 }
 static void SearchablePdfThread(SearchablePdfCtx* c) {
     if (!c || !c->win || !c->ctx || !len(c->srcData)) {
