@@ -385,6 +385,8 @@ const CommandInfo gCommands[] = {
     {CmdSaveLogAs, "CmdSaveLogAs\0", StrL("Save Log As...")},
     {CmdSaveAsSearchablePdf, "CmdSaveAsSearchablePdf\0", StrL("Save as Searchable PDF...")},
     {CmdFlattenPdf, "CmdFlattenPdf\0", StrL("Flatten PDF...")},
+    {CmdReadingStats, "CmdReadingStats\0", StrL("Reading Statistics...")},
+    {CmdExportNotesMd, "CmdExportNotesMd\0", StrL("Export Notes as Markdown...")},
 };
 const int gCommandsCount = dimofi(gCommands);
 
