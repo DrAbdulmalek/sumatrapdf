@@ -1,7 +1,7 @@
 name: linux-daily
 
 on:
-  pull_request:
+  push:
   schedule:
     - cron: "0 1 * * *"
   workflow_dispatch:
