@@ -849,6 +849,12 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
         }
     }
 
+    if (cmdId == CmdExportNotesMd) {
+        if (!ctx.isDocLoaded) {
+            return CommandVisibility::Hide;
+        }
+    }
+
     if (cmdId == CmdSaveAsSearchablePdf || cmdId == CmdFlattenPdf) {
         if (!ctx.isDocLoaded || ctx.engineKind != kindEngineMupdf || !ctx.isPdf) {
             return CommandVisibility::Hide;

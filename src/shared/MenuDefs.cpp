@@ -122,12 +122,22 @@ MenuDef menuDefFile[] = {
     {
         TrN("&Save As..."),
         CmdSaveAs,
+    },
+    {
         TrN("Save Log &As..."),
         CmdSaveLogAs,
+    },
+    {
         TrN("Save as &Searchable PDF..."),
         CmdSaveAsSearchablePdf,
+    },
+    {
         TrN("&Flatten PDF..."),
         CmdFlattenPdf,
+    },
+    {
+        TrN("Export &Notes as Markdown..."),
+        CmdExportNotesMd,
     },
     {
         TrN("Convert to PDF..."),
@@ -236,6 +246,10 @@ MenuDef menuDefView[] = {
     {
         TrN("Command Palette"),
         CmdCommandPalette,
+    },
+    {
+        TrN("Reading &Statistics..."),
+        CmdReadingStats,
     },
     {
         TrN("Navigate Thumbnails"),

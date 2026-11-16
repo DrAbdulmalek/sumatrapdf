@@ -65,6 +65,8 @@
 #include "OverlayScrollbar.h"
 #include "ReadingBar.h"
 #include "ReadingAutoScroll.h"
+#include "ReadingStats.h"
+#include "AutoBackup.h"
 #include "ReadAloud.h"
 #include "SelectTextKeyboard.h"
 #include "SumatraDialogs.h"
@@ -3273,6 +3275,8 @@ void ShellView::OnTick(ShellView* self, gp::Ctx* cx, const gp::TickEvent* ev) {
     CanvasTickPresentation(win, ms);
     DocCanvasSmoothScrollTick(win, ms);
     ReadingAutoScrollTick(win, ms);
+    ReadingStatsTick(win, ms);
+    AutoBackupTick(win, ms);
     ReadAloudTick(win, ms);
     OverlayScrollbarsTick(win, ms);
     FindDebounceTick(win, ms);
