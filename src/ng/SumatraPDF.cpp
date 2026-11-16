@@ -3406,7 +3406,7 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     auto* c = new SearchablePdfCtx();
     c->win = win;
     c->srcPath = str::Dup(engine->FilePath());
-    c->srcData = EngineMupdfSnapshotPdfData(engine, PDF_PERM_COPY);
+    c->srcData = EngineMupdfSnapshotPdfData(engine, FZ_PERMISSION_COPY);
     c->dstPath = str::Dup(path);
     TempStr tempCandidate = fmt("%s.ocr-tmp", path);
     c->tmpPath = str::Dup(MakeUniqueFilePathTemp(tempCandidate));
@@ -3534,7 +3534,7 @@ static void OnFlattenPdfPathPicked(MainWindow* win, SavePathArgs* args) {
     c->win = win;
     c->isFlatten = true;
     c->srcPath = str::Dup(engine->FilePath());
-    c->srcData = EngineMupdfSnapshotPdfData(engine, PDF_PERM_MODIFY);
+    c->srcData = EngineMupdfSnapshotPdfData(engine, FZ_PERMISSION_EDIT);
     c->dstPath = str::Dup(path);
     TempStr tempCandidate = fmt("%s.flatten-tmp", path);
     c->tmpPath = str::Dup(MakeUniqueFilePathTemp(tempCandidate));
