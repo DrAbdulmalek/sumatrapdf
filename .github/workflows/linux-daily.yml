@@ -105,7 +105,7 @@ jobs:
     container: archlinux:latest
     steps:
       - name: install Manjaro-compatible build dependencies
-        run: pacman -Syu --noconfirm --needed base-devel git curl unzip pkgconf libx11 cairo pango gdk-pixbuf2 glib2 openssl nasm
+        run: pacman -Syu --noconfirm --needed base-devel git curl unzip file pkgconf libx11 cairo pango gdk-pixbuf2 glib2 openssl nasm
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: test_util
@@ -120,6 +120,7 @@ jobs:
           ar t "$archive" >/dev/null
 
   wasm:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     # em++ comes from emsdk; setup-emsdk exports EMSDK and puts the tools on
     # PATH, and the sdk's own node runs the test binary. The build is
     # host-independent, so the cheapest runner does
