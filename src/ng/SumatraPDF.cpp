@@ -3240,7 +3240,8 @@ static void ValidatePdfOutput(fz_context* ctx, Str path) {
 }
 
 static void SearchablePdfOpenSnapshot(SearchablePdfCtx* c, fz_buffer** bufferOut, fz_stream** streamOut) {
-    if (!c || !c->ctx || !c->srcData || len(c->srcData) == 0) {
+    if (!c || !c->ctx) return;
+    if (!c->srcData || len(c->srcData) == 0) {
         fz_throw(c->ctx, FZ_ERROR_ARGUMENT, "empty PDF snapshot");
     }
     *bufferOut = fz_new_buffer_from_copied_data(c->ctx, (const unsigned char*)c->srcData.s, (size_t)len(c->srcData));
@@ -3291,6 +3292,104 @@ static void SearchablePdfThread(SearchablePdfCtx* c) {
     uitask::Post(MkFunc0(SearchablePdfFinish, c), "SearchablePdfFinish");
 }
 
+// OCR is local-only. Configure language and an optional tessdata directory in
+// <app-data>/ocr-settings.txt; environment variables override the file.
+static Str OcrTrim(Str s) {
+    while (len(s) > 0 && (s.s[0] == ' ' || s.s[0] == '\t')) s = Str(s.s + 1, len(s) - 1);
+    while (len(s) > 0 && (s.s[len(s) - 1] == ' ' || s.s[len(s) - 1] == '\t' || s.s[len(s) - 1] == '\r')) s = Str(s.s, len(s) - 1);
+    return s;
+}
+
+static TempStr OcrConfigValueTemp(Str config, Str key) {
+    StrVec lines;
+    Split(&lines, config, StrL("\n"), true);
+    for (Str line : lines) {
+        const char* eq = (const char*)memchr(line.s, '=', (size_t)len(line));
+        if (!eq) continue;
+        Str name = OcrTrim(Str(line.s, (int)(eq - line.s)));
+        if (str::EqI(name, key)) {
+            Str value = OcrTrim(Str(eq + 1, len(line) - (int)(eq + 1 - line.s)));
+            return str::DupTemp(value);
+        }
+    }
+    return {};
+}
+
+static bool OcrLanguageIsSupported(Str language) {
+    return str::EqI(language, StrL("eng")) || str::EqI(language, StrL("ara")) ||
+           str::EqI(language, StrL("eng+ara")) || str::EqI(language, StrL("ara+eng"));
+}
+
+static bool OcrDataDirHasLanguage(Str dir, Str language) {
+    if (len(dir) == 0) return false;
+    StrVec langs;
+    Split(&langs, language, StrL("+"), true);
+    for (Str lang : langs) {
+        TempStr trainedData = path::JoinTemp(dir, fmt("%s.traineddata", lang));
+        if (!file::Exists(trainedData)) return false;
+    }
+    return len(langs) > 0;
+}
+
+static TempStr OcrFindTessdataDirTemp(Str configured, Str language) {
+    if (len(configured) > 0) {
+        if (OcrDataDirHasLanguage(configured, language)) return str::DupTemp(configured);
+        TempStr nested = path::JoinTemp(configured, StrL("tessdata"));
+        if (OcrDataDirHasLanguage(nested, language)) return nested;
+        return {}; // explicit invalid path: do not silently use another model set
+    }
+    const char* env = getenv("SUMATRA_TESSDATA_PREFIX");
+    if (!env || !env[0]) env = getenv("TESSDATA_PREFIX");
+    if (env && env[0]) {
+        Str envDir(env);
+        if (OcrDataDirHasLanguage(envDir, language)) return str::DupTemp(envDir);
+        TempStr nested = path::JoinTemp(envDir, StrL("tessdata"));
+        if (OcrDataDirHasLanguage(nested, language)) return nested;
+        return {};
+    }
+    const Str candidates[] = {
+        StrL("/usr/share/tesseract-ocr/5/tessdata"),
+        StrL("/usr/share/tesseract-ocr/4.00/tessdata"),
+        StrL("/usr/share/tessdata"),
+        StrL("/usr/local/share/tessdata"),
+    };
+    for (Str dir : candidates) {
+        if (OcrDataDirHasLanguage(dir, language)) return str::DupTemp(dir);
+    }
+    TempStr appData = path::JoinTemp(GetAppDataDirTemp(), StrL("tessdata"));
+    if (OcrDataDirHasLanguage(appData, language)) return appData;
+    return {};
+}
+
+static bool BuildOcrWriterOptions(MainWindow* win, TempStr* optionsOut) {
+    TempStr configPath = path::JoinTemp(GetAppDataDirTemp(), StrL("ocr-settings.txt"));
+    Str config = file::ReadFile(configPath);
+    TempStr language = OcrConfigValueTemp(config, StrL("language"));
+    TempStr configuredDir = OcrConfigValueTemp(config, StrL("tessdata"));
+    str::Free(config);
+    const char* envLanguage = getenv("SUMATRA_OCR_LANGUAGE");
+    if (envLanguage && envLanguage[0]) language = str::DupTemp(Str(envLanguage));
+    if (len(language) == 0) language = str::DupTemp(StrL("eng"));
+    if (str::EqI(language, StrL("ara+eng"))) language = str::DupTemp(StrL("eng+ara"));
+    str::ToLowerInPlace(language);
+    if (!OcrLanguageIsSupported(language)) {
+        ShowTemporaryNotification(win, Tr("Unsupported OCR language. Use eng, ara, or eng+ara in ocr-settings.txt"), kNotif5SecsTimeOut);
+        return false;
+    }
+    const char* envDir = getenv("SUMATRA_TESSDATA_PREFIX");
+    if (envDir && envDir[0]) configuredDir = str::DupTemp(Str(envDir));
+    TempStr dataDir = OcrFindTessdataDirTemp(configuredDir, language);
+    if (len(dataDir) == 0) {
+        ShowTemporaryNotification(win, Tr("OCR traineddata is missing. Configure tessdata in ocr-settings.txt"), kNotif5SecsTimeOut);
+        return false;
+    }
+    if (strchr(dataDir.s, ',')) {
+        ShowTemporaryNotification(win, Tr("The tessdata path cannot contain a comma"), kNotif5SecsTimeOut);
+        return false;
+    }
+    *optionsOut = fmt("ocr-language=%s,ocr-datadir=%s,compression=flate", language, dataDir);
+    return true;
+}
 static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
     // args->path is valid only during onDone; the dialog deletes args itself.
     TempStr path = str::DupTemp(args->path);
@@ -3303,8 +3402,8 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
         ShowTemporaryNotification(win, Tr("No PDF document loaded"), kNotif5SecsTimeOut);
         return;
     }
-    // The worker reopens the source file in its own context, so nothing from
-    // the UI engine has to be kept alive here.
+    // Capture the live document before the worker starts: this preserves
+    // unsaved edits and supports already-authenticated encrypted PDFs.
     auto* c = new SearchablePdfCtx();
     c->win = win;
     c->srcPath = str::Dup(engine->FilePath());
@@ -3323,7 +3422,13 @@ static void OnSearchablePdfPathPicked(MainWindow* win, SavePathArgs* args) {
         SearchablePdfFreeCtx(c);
         return;
     }
-    TempStr options = fmt("ocr-language=eng,compression=flate");
+    TempStr options;
+    if (!BuildOcrWriterOptions(win, &options)) {
+        fz_drop_context(c->ctx);
+        c->ctx = nullptr;
+        SearchablePdfFreeCtx(c);
+        return;
+    }
     // Writer creation/configuration may throw in MuPDF; catch it before
     // handing ownership to the asynchronous worker.
     bool writerSetupOk = false;
