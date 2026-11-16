@@ -128,6 +128,17 @@ void EngineMupdfCancelLoadAllAnnotations(EngineBase*);
 bool EngineMupdfApplyRedactions(EngineBase*, Vec<Annotation*>& deletedOut);
 void EngineMupdfBeginOperation(EngineBase*, const char* name);
 void EngineMupdfEndOperation(EngineBase*);
+
+/* OCR / Flatten worker support (P0 audit 2026-11-16): the ng UI must not
+   include EngineMupdf.h directly (the amalgamation inlines headers in a
+   fixed order), so these free functions encapsulate the engine internals. */
+struct fz_context;
+bool EngineMupdfHasLoadedDocument(EngineBase*);
+bool EngineMupdfHasLoadedPdfDocument(EngineBase*);
+// Clones the engine's base context for a background worker; nullptr on
+// failure. The worker opens its own documents with it; no document object
+// is ever shared between the UI and the worker thread.
+fz_context* EngineMupdfCloneContextForWorker(EngineBase*);
 enum class UndoDir {
     Undo,
     Redo

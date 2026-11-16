@@ -12993,3 +12993,26 @@ TempStr EngineMupdfGetPdfInfo(Str path, Str password) {
     fz_drop_context(ctx);
     return res;
 }
+
+// --- OCR / Flatten worker support (see EngineAll.h declarations) ------------
+
+bool EngineMupdfHasLoadedDocument(EngineBase* engine) {
+    EngineMupdf* e = AsEngineMupdf(engine);
+    return e && e->_doc;
+}
+
+bool EngineMupdfHasLoadedPdfDocument(EngineBase* engine) {
+    EngineMupdf* e = AsEngineMupdf(engine);
+    return e && e->_doc && e->pdfdoc;
+}
+
+fz_context* EngineMupdfCloneContextForWorker(EngineBase* engine) {
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e || !e->_doc) {
+        return nullptr;
+    }
+    // fz_clone_context shares only the allocator/locks/store configuration.
+    // The worker must open its own documents with it; sharing document
+    // objects between the UI and a worker thread is not safe (P0-5).
+    return fz_clone_context(e->Ctx());
+}
