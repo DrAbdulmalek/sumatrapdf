@@ -38,6 +38,6 @@ The configured path is validated before starting OCR. Missing traineddata is rep
 
 ## Password-protected and modified PDFs
 
-OCR and Flatten create an in-memory snapshot of the currently open PDF under the document locks. This snapshot includes unsaved annotations/edits and is serialized without encryption only in process memory so the worker can process an already-authenticated document without asking for its password again. The original document, its encryption, and its on-disk file are not changed by snapshot creation. MuPDF's PDF permission flags are checked first: OCR requires copy permission and Flatten requires modify permission. The in-memory snapshot is released after the worker finishes.
+OCR and Flatten create an in-memory snapshot of the currently open PDF under the document locks. This snapshot includes unsaved annotations/edits and is serialized without encryption only in process memory so the worker can process an already-authenticated document without asking for its password again. The original document, its encryption, and its on-disk file are not changed by snapshot creation. MuPDF's PDF permission flags are checked first: OCR requires copy permission and Flatten requires modify permission. Restricted documents are rejected rather than silently bypassing their permission flags. The in-memory snapshot is released after the worker finishes.
 
 No decrypted snapshot is written to disk.
